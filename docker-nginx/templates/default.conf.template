@@ -70,10 +70,7 @@ server {
 
   # upgrade to https
   error_page 497 https://$host:${WEB_HTTPS_PORT}$request_uri
-
-  # include additional config from the current QFieldCloud instance. This is different from the default `conf.d` directory.
-  include config.d/*.conf;
-
+  
   # deny annoying bot
   deny 34.215.13.216;
 

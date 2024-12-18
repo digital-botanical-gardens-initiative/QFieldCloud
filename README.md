@@ -12,6 +12,10 @@ Clone the repository and all its submodules:
 
     git clone https://github.com/digital-botanical-gardens-initiative/QFieldCloud.git
 
+### Control the .env file
+
+Make sure to use the .env file available on the server to have a working configuration
+
 ### Launch the instance
 
 To build images and run the containers:
@@ -25,3 +29,7 @@ Run the django database migrations.
 Collect the static files (CSS, JS etc):
 
     docker compose run app python manage.py collectstatic --noinput
+
+### Done
+
+You should see the instance pointing on https://emi-colleciton.unifr.ch/qfieldcloud/.

@@ -1,5 +1,10 @@
 services:
 
+  nginx:
+    volumes:
+      - static_volume:/var/www/html/staticfiles/
+      - media_volume:/var/www/html/mediafiles/
+
   db:
     image: postgis/postgis:13-3.1-alpine
     restart: unless-stopped

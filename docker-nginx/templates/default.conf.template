@@ -45,7 +45,7 @@ server {
 
   # use $WEB_HTTPS_PORT in the configuration, since it might be different from 443 (e.g. localhost)
   location / {
-    return 302 https://$host:${WEB_HTTPS_PORT}$request_uri;
+    return 302 http://134.21.20.118:${WEB_HTTPS_PORT}$request_uri;
   }
 }
 
@@ -69,8 +69,8 @@ server {
   root /var/www/html/;
 
   # upgrade to https
-  error_page 497 https://$host:${WEB_HTTPS_PORT}$request_uri
-  
+  error_page 497 http://134.21.20.118:${WEB_HTTPS_PORT}$request_uri
+
   # deny annoying bot
   deny 34.215.13.216;
 

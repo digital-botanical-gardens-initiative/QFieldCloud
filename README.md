@@ -32,4 +32,4 @@ Collect the static files (CSS, JS etc):
 
 ### Done
 
-You should see the instance pointing on https://emi-colleciton.unifr.ch/qfieldcloud/.
+You should see the instance pointing on https://emi-collection.unifr.ch/qfieldcloud/.

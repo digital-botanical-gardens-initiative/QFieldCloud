@@ -14,14 +14,14 @@ Clone the repository and all its submodules:
 
 ### Launch the instance
 
-- To build images and run the containers:
+To build images and run the containers:
 
     docker compose up -d --build
 
-- Run the django database migrations.
+Run the django database migrations.
 
     docker compose exec app python manage.py migrate
 
-- Collect the static files (CSS, JS etc):
+Collect the static files (CSS, JS etc):
 
     docker compose run app python manage.py collectstatic --noinput

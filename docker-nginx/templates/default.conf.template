@@ -50,7 +50,7 @@ server {
 }
 
 server {
-  listen 443;
+  listen 443 ssl;
 
   ssl_certificate     ${QFIELDCLOUD_TLS_CERT};
   ssl_certificate_key ${QFIELDCLOUD_TLS_KEY};

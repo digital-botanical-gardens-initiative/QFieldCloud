@@ -18,15 +18,29 @@ If repository already exists:
 
     git pull
 
+### Fetch updates from official opengisch repository (optional):
+
+Check that upstream repository is https://github.com/opengisch/QFieldCloud.git
+
+    git remote -v
+
+If this is not the case: 
+
+    git remote add upstream https://github.com/opengisch/QFieldCloud.git
+
+Fetch changes from opengisch:
+
+    git fetch upstream
+
 ### Control the .env file
 
-Make sure to use the .env file available on the server to have a working configuration
+Make sure to use the correct .env file
 
 ### Launch the instance
 
 To build images and run the containers:
 
-    docker compose up -d --build
+    docker compose up -d --build --remove-orphans
 
 Run the django database migrations.
 
@@ -39,3 +53,12 @@ Collect the static files (CSS, JS etc):
 ### Done
 
 You should see the instance pointing on https://emi-collection.unifr.ch/qfieldcloud/.
+
+### Optionaly perform some cleanup
+
+You can stop unused containers such as rnwood/smtp4dev:v3 and certbot (docker stop <CONTAINER ID>)
+
+You can clean unused docker stuff (removes all unused containers, images, neworks and volumes):
+    
+    docker system prune -a
+

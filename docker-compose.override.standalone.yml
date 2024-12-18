@@ -13,7 +13,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
+      - postgres_data:/docker/qfieldcloud/postgresql/data
     ports:
       - ${HOST_POSTGRES_PORT}:5432
     command: ["postgres", "-c", "log_statement=all", "-c", "log_destination=stderr"]
@@ -22,7 +22,7 @@ services:
     image: postgis/postgis:12-3.0
     restart: unless-stopped
     volumes:
-      - geodb_data:/var/lib/postgresql
+      - geodb_data:/docker/qfieldcloud/postgresql
     environment:
       POSTGRES_DB: ${GEODB_DB}
       POSTGRES_USER: ${GEODB_USER}

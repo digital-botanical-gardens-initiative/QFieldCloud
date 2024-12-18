@@ -8,9 +8,15 @@ QFieldCloud allows seamless synchronization of your field data with your spatial
 
 ### Clone the repository
 
-Clone the repository and all its submodules:
+Clone the repository:
 
     git clone https://github.com/digital-botanical-gardens-initiative/QFieldCloud.git
+
+If repository already exists:
+    
+    cd /to/existing/repository/QFieldCloud
+
+    git pull
 
 ### Control the .env file
 

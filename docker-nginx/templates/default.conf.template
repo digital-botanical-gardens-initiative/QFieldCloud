@@ -69,12 +69,7 @@ server {
   root /var/www/html/;
 
   # upgrade to https
-  error_page 497 https://$host:${WEB_HTTPS_PORT}$request_uri;
-
-  # prevent access by IP
-  if ($http_host !~ "${QFIELDCLOUD_HOST}(:${WEB_HTTPS_PORT})?") {
-    return 444;
-  }
+  error_page 497 https://$host:${WEB_HTTPS_PORT}$request_uri
 
   # include additional config from the current QFieldCloud instance. This is different from the default `conf.d` directory.
   include config.d/*.conf;

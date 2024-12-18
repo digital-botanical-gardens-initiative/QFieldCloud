@@ -73,13 +73,6 @@ server {
   # path for static files (only needed for serving local staticfiles)
   root /var/www/html/;
 
-  # Serve static files
-  location /staticfiles/ {
-      alias /usr/src/app/staticfiles/;
-      expires max;
-      access_log off;
-  }
-
   # upgrade to https
   error_page 497 https://$host:${WEB_HTTPS_PORT}$request_uri;
 

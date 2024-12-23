@@ -58,7 +58,3 @@ You should see the instance pointing on https://emi-collection.unifr.ch/qfieldcl
 
 You can stop unused containers such as rnwood/smtp4dev:v3 and certbot (docker stop <CONTAINER ID>)
 
-You can clean unused docker stuff (removes all unused containers, images, neworks and volumes):
-    
-    docker system prune -a
-

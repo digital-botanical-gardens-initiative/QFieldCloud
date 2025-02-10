@@ -48,6 +48,10 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT")
 # 'DJANGO_ALLOWED_HOSTS' should be a single string of hosts with a space between each.
 # For example: 'DJANGO_ALLOWED_HOSTS=localhost 127.0.0.1 [::1]'
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(" ")
+CSRF_TRUSTED_ORIGINS = [
+    'https://emi-collection.unifr.ch',
+]
+
 
 # A tuple representing an HTTP header/value combination that signifies a request is secure, which is important for Django’s CSRF protection.
 # We need to set it in QFieldCloud as we run behind a proxy.

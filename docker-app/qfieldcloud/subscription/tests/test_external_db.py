@@ -5,12 +5,13 @@ from time import sleep
 
 import psycopg2
 from django.conf import settings
+from rest_framework import status
+from rest_framework.test import APITransactionTestCase
+
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.geodb_utils import delete_db_and_role
 from qfieldcloud.core.models import Delta, Geodb, Job, Person, Project
 from qfieldcloud.core.tests.utils import setup_subscription_plans
-from rest_framework import status
-from rest_framework.test import APITransactionTestCase
 
 from ..models import Plan
 
@@ -141,10 +142,14 @@ class QfcTestCase(APITransactionTestCase):
             },
             format="multipart",
         )
+
         self.assertEqual(Delta.objects.filter(project=p1).count(), 2)
+
         print("-------------------")
+
         for delta in Delta.objects.filter(project=p1):
             print(delta)
+
         self.assertEqual(
             Delta.objects.filter(project=p1).latest("created_at").last_status,
             Delta.Status.PENDING,

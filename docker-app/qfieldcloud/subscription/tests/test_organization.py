@@ -1,5 +1,7 @@
 import logging
 
+from rest_framework.test import APITransactionTestCase
+
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.models import (
     Organization,
@@ -12,7 +14,6 @@ from qfieldcloud.core.models import (
 )
 from qfieldcloud.core.tests.utils import set_subscription, setup_subscription_plans
 from qfieldcloud.subscription.exceptions import ReachedMaxOrganizationMembersError
-from rest_framework.test import APITransactionTestCase
 
 logging.disable(logging.CRITICAL)
 
@@ -34,9 +35,9 @@ class QfcTestCase(APITransactionTestCase):
         is_valid: bool = True,
     ):
         """Asserts that user has give role/origin on project"""
-        assert (role is None) == (
-            origin is None
-        ), "Both role and origin should be either defined or undefined!"
+        assert (role is None) == (origin is None), (
+            "Both role and origin should be either defined or undefined!"
+        )
 
         # Assert user does not have any role
         if role is None:

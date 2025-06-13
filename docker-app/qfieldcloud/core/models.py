@@ -6,7 +6,8 @@ import string
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import django_cryptography.fields
 from deprecated import deprecated
@@ -15,22 +16,33 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import UserManager as DjangoUserManager
 from django.contrib.gis.db import models
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
+from django.core.validators import (
+    FileExtensionValidator,
+    MaxValueValidator,
+    MinValueValidator,
+    RegexValidator,
+)
 from django.db import transaction
-from django.db.models import Case, Exists, F, OuterRef, Q
+from django.db.models import Case, Exists, F, OuterRef, Q, When
 from django.db.models import Value as V
-from django.db.models import When
 from django.db.models.aggregates import Count, Sum
 from django.db.models.fields.json import JSONField
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils.functional import cached_property
-from django.utils.safestring import SafeString, mark_safe
 from django.utils.translation import gettext as _
 from model_utils.managers import InheritanceManager, InheritanceManagerMixin
+from timezone_field import TimeZoneField
+
 from qfieldcloud.core import geodb_utils, utils, validators
+from qfieldcloud.core.fields import DynamicStorageFileField, QfcImageField, QfcImageFile
 from qfieldcloud.core.utils2 import storage
 from qfieldcloud.subscription.exceptions import ReachedMaxOrganizationMembersError
-from timezone_field import TimeZoneField
+
+if TYPE_CHECKING:
+    from qfieldcloud.filestorage.models import File
+
+
+SHARED_DATASETS_PROJECT_NAME = "shared_datasets"
 
 # http://springmeblog.com/2018/how-to-implement-multiple-user-types-with-django/
 
@@ -189,10 +201,10 @@ class UserManager(InheritanceManagerMixin, DjangoUserManager):
         """Searches a user by `username` or `email` field
 
         Args:
-            username_or_email (str): username or email to search for
+            username_or_email: username or email to search for
 
         Returns:
-            User: The user with that username or email.
+            The user with that username or email.
         """
         return self.get(Q(username=username_or_email) | Q(email=username_or_email))
 
@@ -218,10 +230,10 @@ class User(AbstractUser):
     """User model. Used as base for organizations and teams too.
 
     Args:
-        AbstractUser (AbstractUser): the django's abstract user base
+        the django's abstract user base
 
     Returns:
-        User: the user instance
+        the user instance
 
     Note:
         If you add validators in the constructor, note they will be added multiple times for each class that extends User.
@@ -329,12 +341,6 @@ class User(AbstractUser):
         else:
             super().save(*args, **kwargs)
 
-    def delete(self, *args, **kwargs):
-        if self.type != User.Type.TEAM:
-            storage.delete_user_avatar(self)
-
-        return super().delete(*args, **kwargs)
-
     class Meta:
         base_manager_name = "objects"
         verbose_name = "user"
@@ -400,6 +406,32 @@ class Person(User):
         return super().save(*args, **kwargs)
 
 
+def get_user_account_avatar_upload_to(
+    instance: models.Model,
+    filename: str,
+) -> str:
+    instance = cast(UserAccount, instance)
+    filename_path = Path(filename)
+
+    return f"account/{instance.user.username}/avatars/{filename_path.name}"
+
+
+def get_user_account_avatar_download_from(
+    instance: models.Model, value: QfcImageFile | None
+) -> str | None:
+    if not value:
+        return None
+
+    useraccount = cast(UserAccount, value.instance)
+
+    return reverse(
+        "filestorage_avatars",
+        kwargs={
+            "username": useraccount.user.username,
+        },
+    )
+
+
 class UserAccount(models.Model):
     NOTIFS_IMMEDIATELY = timedelta(minutes=0)
     NOTIFS_HOURLY = timedelta(hours=1)
@@ -429,7 +461,24 @@ class UserAccount(models.Model):
     location = models.CharField(max_length=255, default="", blank=True)
     twitter = models.CharField(max_length=255, default="", blank=True)
     is_email_public = models.BooleanField(default=False)
-    avatar_uri = models.CharField(_("Profile Picture URI"), max_length=255, blank=True)
+
+    # TODO Delete with QF-4963 Drop support for legacy storage
+    legacy_avatar_uri = models.CharField(
+        _("Legacy Profile Picture URI"),
+        max_length=255,
+        blank=True,
+    )
+
+    avatar = QfcImageField(
+        _("Avatar Picture"),
+        upload_to=get_user_account_avatar_upload_to,
+        download_from=get_user_account_avatar_download_from,
+        # the s3 storage has 1024 bytes (not chars!) limit: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html
+        max_length=1024,
+        null=True,
+        blank=True,
+    )
+
     timezone = TimeZoneField(
         default=settings.TIME_ZONE, choices_display="WITH_GMT_OFFSET"
     )
@@ -455,16 +504,6 @@ class UserAccount(models.Model):
 
         Subscription = get_subscription_model()
         return Subscription.get_upcoming_subscription(self)
-
-    @property
-    def avatar_url(self):
-        if self.avatar_uri:
-            return reverse_lazy(
-                "public_files",
-                kwargs={"filename": self.avatar_uri},
-            )
-        else:
-            return None
 
     @property
     def storage_used_bytes(self) -> float:
@@ -679,8 +718,8 @@ class Organization(User):
         Active users are users triggering a job or pushing a delta on a project owned by the organization.
 
         Args:
-            period_since (datetime): inclusive beginning of the interval
-            period_until (datetime): inclusive end of the interval
+            period_since: inclusive beginning of the interval
+            period_until: inclusive end of the interval
         """
         assert period_since
         assert period_until
@@ -710,10 +749,12 @@ class Organization(User):
 
     def save(self, *args, **kwargs):
         self.type = User.Type.ORGANIZATION
+
         if getattr(self, "created_by", None) is not None:
             self.created_by = self.created_by
         else:
             self.created_by = self.organization_owner
+
         return super().save(*args, **kwargs)
 
 
@@ -985,6 +1026,19 @@ class ProjectQueryset(models.QuerySet):
         return qs
 
 
+def get_project_file_storage_default() -> str:
+    """Get the default file storage for the newly created project
+
+    Returns:
+        the name of the storage
+    """
+    return settings.STORAGES_PROJECT_DEFAULT_STORAGE
+
+
+def get_project_thumbnail_upload_to(instance: "Project", _filename: str) -> str:
+    return f"projects/{instance.id}/meta/thumbnail.png"
+
+
 class Project(models.Model):
     """Represent a QFieldcloud project.
     It corresponds to a directory on the file system.
@@ -1010,17 +1064,44 @@ class Project(models.Model):
         QGISCORE = "qgiscore", _("QGIS Core Offline Editing (deprecated)")
         PYTHONMINI = "pythonmini", _("Optimized Packager")
 
+    @property
+    def localized_layers(self) -> list[dict[str, Any]]:
+        """
+        Retrieve all layers from `Project.project_details` that have their `is_localized` flag set to `True`.
+
+        Returns:
+            A list of layer detail dictionaries where each dict has 'is_localized' == True.
+            If project_details is missing or empty, returns an empty list.
+        """
+        if not self.project_details:
+            return []
+
+        layers_by_id = self.project_details.get("layers_by_id", {})
+
+        localized_layers = []
+        for layer_detail in layers_by_id.values():
+            if layer_detail.get("is_localized", False):
+                localized_layers.append(layer_detail)
+
+        return localized_layers
+
+    def _get_file_storage_name(self) -> str:
+        """Returns the file storage name where all the files are stored. Used by `DynamicStorageFileField` and `DynamicStorageFieldFile`."""
+        return self.file_storage
+
     objects = ProjectQueryset.as_manager()
 
     _status_code = StatusCode.OK
 
     class Meta:
-        ordering = ["owner__username", "name"]
+        ordering = ["-is_featured", "owner__username", "name"]
         constraints = [
             models.UniqueConstraint(
                 fields=["owner", "name"], name="project_owner_name_uniq"
             )
         ]
+
+    files: "models.QuerySet[File]"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(
@@ -1037,7 +1118,7 @@ class Project(models.Model):
     )
 
     description = models.TextField(blank=True)
-    project_filename = models.TextField(blank=True, null=True)
+    the_qgis_file_name = models.TextField(blank=True, null=True)
     project_details = models.JSONField(blank=True, null=True)
     is_public = models.BooleanField(
         default=False,
@@ -1065,6 +1146,7 @@ class Project(models.Model):
     data_last_updated_at = models.DateTimeField(blank=True, null=True)
     data_last_packaged_at = models.DateTimeField(blank=True, null=True)
 
+    last_package_job_id: uuid.UUID
     last_package_job = models.ForeignKey(
         "PackageJob",
         on_delete=models.SET_NULL,
@@ -1092,8 +1174,19 @@ class Project(models.Model):
         ),
     )
 
-    thumbnail_uri = models.CharField(
-        _("Thumbnail Picture URI"), max_length=255, blank=True
+    # TODO: Delete with QF-4963 Drop support for legacy storage
+    legacy_thumbnail_uri = models.CharField(
+        _("Legacy Thumbnail Picture URI"), max_length=255, blank=True
+    )
+
+    thumbnail = DynamicStorageFileField(
+        _("Thumbnail Picture"),
+        upload_to=get_project_thumbnail_upload_to,
+        # the s3 storage has 1024 bytes (not chars!) limit: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html
+        max_length=1024,
+        null=True,
+        blank=True,
+        validators=(FileExtensionValidator(allowed_extensions=("png", "jpg")),),
     )
 
     # Duplicating logic from the plan's storage_keep_versions
@@ -1121,12 +1214,133 @@ class Project(models.Model):
         choices=PackagingOffliner.choices,
     )
 
+    file_storage = models.CharField(
+        _("File storage"),
+        help_text=_(
+            "Which file storage provider should be used for the storing the project related files."
+        ),
+        max_length=100,
+        validators=[validators.file_storage_name_validator],
+        default=get_project_file_storage_default,
+        editable=False,
+    )
+
+    file_storage_migrated_at = models.DateTimeField(
+        _("File Storage Migrated At"),
+        blank=True,
+        null=True,
+        editable=False,
+    )
+
+    is_locked = models.BooleanField(
+        _("Is locked"),
+        help_text=_(
+            "If set to true, the project is temporarily locked. Locking is internal QFieldCloud mechanism related to file storage migration or other file operations."
+        ),
+        default=False,
+    )
+
+    is_featured = models.BooleanField(
+        _("Is sticky"),
+        help_text=_(
+            "If set to true, the project will always appear on top of the project list, no matter the sorting. If multiple projects are featured, they will be sorted by the user defined sorting."
+        ),
+        default=False,
+    )
+
+    attachments_file_storage = models.CharField(
+        _("Attachments file storage"),
+        help_text=_(
+            "Which file storage provider should be used for storing the project attachments files."
+        ),
+        max_length=100,
+        validators=[validators.file_storage_name_validator],
+        default=get_project_file_storage_default,
+    )
+
+    # When enabled, the client (e.g. QField) is informed that attachments
+    # can be fetched on demand at a later stage instead of downloading in bulk with the other package files.
+    # This can reduce the size of packaged data, especially for
+    # projects with large or numerous attachments.
+    is_attachment_download_on_demand = models.BooleanField(
+        default=False,
+        help_text=_(
+            "If enabled, it indicates to the client (e.g. QField) that the attachments may be downloaded on demand."
+        ),
+    )
+
+    @cached_property
+    def shared_datasets_project(self) -> Project | None:
+        """
+        Returns the localized datasets project for the same owner, or `None` if no such project exists.
+        """
+        try:
+            project = Project.objects.get(
+                name=SHARED_DATASETS_PROJECT_NAME,
+                owner=self.owner,
+            )
+            return project
+        except Project.DoesNotExist:
+            return None
+
+    @cached_property
+    def is_shared_datasets_project(self) -> bool:
+        """
+        Returns `True` if the project is the shared datasets project, otherwise `False`.
+        """
+        return self.name == SHARED_DATASETS_PROJECT_NAME
+
+    def get_missing_localized_layers(self) -> list[dict[str, Any]]:
+        """
+        Of all localized layers, return those whose filenames aren’t in `available_filenames`,
+        which means they are not present in the associated localized datasets project storage.
+
+        Returns:
+            A list of layer-detail dicts (same shape as in `localized_layers`)
+            that need to be added/uploaded.
+        """
+        from qfieldcloud.filestorage.models import File
+
+        if not self.project_details:
+            return []
+
+        if not self.shared_datasets_project:
+            # Return all layers if the project is missing
+            return self.localized_layers
+
+        if self.uses_legacy_storage:
+            available_shared_files = utils.get_project_files(
+                str(self.shared_datasets_project.id)
+            )
+            available_filenames = [file.name for file in available_shared_files]
+
+        else:
+            available_filenames = File.objects.filter(
+                project=self.shared_datasets_project
+            ).values_list("name", flat=True)
+
+        missing_localized_layers = []
+        for layer in self.localized_layers:
+            if "filename" not in layer:
+                continue
+            # TODO: refactor and extract filename splitting logic into a reusable utility.
+            filename = layer["filename"].split("localized:")[-1]
+
+            if filename not in available_filenames:
+                missing_localized_layers.append(layer)
+
+        return missing_localized_layers
+
+    @property
+    def has_the_qgis_file(self) -> bool:
+        return bool(self.the_qgis_file_name)
+
     @property
     def owner_aware_storage_keep_versions(self) -> int:
         """Determine the storage versions to keep based on the owner's subscription plan and project settings.
 
         Returns:
-            int: the number of file versions, should be always greater than 1
+            the number of file versions, should be always greater than 1
         """
         subscription = self.owner.useraccount.current_subscription
 
@@ -1142,14 +1356,25 @@ class Project(models.Model):
         return keep_count
 
     @property
-    def thumbnail_url(self):
-        if self.thumbnail_uri:
-            return reverse_lazy(
-                "project_metafiles",
-                kwargs={"projectid": self.id, "filename": self.thumbnail_uri[51:]},
-            )
+    def thumbnail_url(self) -> str:
+        """Returns the url to the project's thumbnail or empty string if no URL provided.
+
+        Todo:
+            * Delete with QF-4963 Drop support for legacy storage
+        """
+        if self.uses_legacy_storage:
+            if not self.legacy_thumbnail_uri:
+                return ""
         else:
-            return None
+            if not self.thumbnail:
+                return ""
+
+        return reverse_lazy(
+            "filestorage_project_thumbnails",
+            kwargs={
+                "project_id": self.id,
+            },
+        )
 
     def get_absolute_url(self):
         return reverse_lazy(
@@ -1175,7 +1400,7 @@ class Project(models.Model):
         neither the extraction from the projectfile, nor the configuration in QFieldSync are implemented.
 
         Returns:
-            list[str]: A list configured attachment dirs for the project.
+            A list configured attachment dirs for the project.
         """
         attachment_dirs = []
 
@@ -1188,19 +1413,51 @@ class Project(models.Model):
         return attachment_dirs
 
     @property
+    def has_attachments_files(self) -> bool:
+        """
+        Checks if the project has at least one attachment file.
+        """
+        return any(f.is_attachment() for f in self.files.all())
+
+    @property
     def private(self) -> bool:
         # still used in the project serializer
         return not self.is_public
 
+    @property
+    def uses_legacy_storage(self) -> bool:
+        """Whether the storage of the project is legacy.
+
+        Todo:
+            * Delete with QF-4963 Drop support for legacy storage
+        """
+        return self.file_storage == settings.LEGACY_STORAGE_NAME
+
     @cached_property
-    def files(self) -> list[utils.S3ObjectWithVersions]:
-        """Gets all the files from S3 storage. This is potentially slow. Results are cached on the instance."""
-        return list(utils.get_project_files_with_versions(self.id))
+    @deprecated
+    def legacy_files(self) -> list[utils.S3ObjectWithVersions]:
+        """Gets all the files from S3 storage. This is potentially slow. Results are cached on the instance.
+
+        Todo:
+            * Delete with QF-4963 Drop support for legacy storage
+        """
+        if self.uses_legacy_storage:
+            return list(utils.get_project_files_with_versions(str(self.id)))
+        else:
+            raise NotImplementedError(
+                "The `Project.legacy_files` method is not implemented for projects stored in non-legacy storage"
+            )
 
     @property
-    @deprecated("Use `len(project.files)` instead")
     def files_count(self):
-        return len(self.files)
+        """
+        Todo:
+            * Delete with QF-4963 Drop support for legacy storage
+        """
+        if self.uses_legacy_storage:
+            return len(self.legacy_files)
+        else:
+            return self.files.count()
 
     @property
     def users(self):
@@ -1254,10 +1511,14 @@ class Project(models.Model):
             return True
 
     @property
-    def problems(self) -> list[dict]:
+    def problems(self) -> list[dict[str, Any]]:
         problems = []
 
-        if not self.project_filename:
+        # Check if localized datasets project, then skip the rest of the checks as they are not applicable
+        if self.name == SHARED_DATASETS_PROJECT_NAME:
+            return problems
+
+        if not self.has_the_qgis_file:
             problems.append(
                 {
                     "layer": None,
@@ -1269,40 +1530,72 @@ class Project(models.Model):
                     ),
                 }
             )
+
         elif self.project_details:
+            if self.localized_layers:
+                if self.shared_datasets_project:
+                    localized_project_url = reverse_lazy(
+                        "project_overview",
+                        kwargs={
+                            "username": self.shared_datasets_project.owner.username,
+                            "project": self.shared_datasets_project.name,
+                        },
+                    )
+                    missing_localized_file_solution = _(
+                        'Upload the missing file to the "<a href="{}">{}</a>" project or update the layer to point to an available file.'
+                    ).format(localized_project_url, SHARED_DATASETS_PROJECT_NAME)
+                else:
+                    problems.append(
+                        {
+                            "layer": None,
+                            "level": "warning",
+                            "code": "missing_localized_project",
+                            "description": _('Cannot find the "{}" project.').format(
+                                SHARED_DATASETS_PROJECT_NAME
+                            ),
+                            "solution": _("Ensure the shared dataset project exists."),
+                        }
+                    )
+                    missing_localized_file_solution = _(
+                        'Upload the missing file to the "{}" project or update the layer to point to an available file.'
+                    ).format(SHARED_DATASETS_PROJECT_NAME)
+
+                for missing_layer in self.get_missing_localized_layers():
+                    problems.append(
+                        {
+                            "layer": missing_layer.get("filename"),
+                            "level": "warning",
+                            "code": "missing_localized_file",
+                            "description": _(
+                                'Localized dataset stored at "{}" is missing.'
+                            ).format(missing_layer.get("filename")),
+                            "solution": missing_localized_file_solution,
+                        }
+                    )
+
             for layer_data in self.project_details.get("layers_by_id", {}).values():
                 layer_name = layer_data.get("name")
 
-                if layer_data.get("error_code") != "no_error":
-                    solution: str | SafeString
-                    if layer_data.get("error_code") == "localized_dataprovider":
-                        description = _('Layer "{}" dataprovider is localized').format(
-                            layer_name
-                        )
-                        solution = mark_safe(
-                            _(
-                                'Make sure your <a href="https://docs.qfield.org/fr/how-to/outside-layers/">localized layer</a> is available on your QField device.'
-                            )
-                        )
-                    else:
-                        description = _(
-                            'Layer "{}" has an error with code "{}": {}'
-                        ).format(
-                            layer_name,
-                            layer_data.get("error_code"),
-                            layer_data.get("error_summary"),
-                        )
-                        solution = _(
-                            'Check the latest "process_projectfile" job logs for more info and reupload the project files with the required changes.'
-                        )
+                # All the layers stored in the localized datasets project will be with errors, so we just skip them. We handled them separately before this for loop.
+                if layer_data.get("error_code") == "localized_dataprovider":
+                    continue
 
+                if layer_data.get("error_code") != "no_error":
                     problems.append(
                         {
                             "layer": layer_name,
                             "level": "warning",
                             "code": "layer_problem",
-                            "description": description,
-                            "solution": solution,
+                            "description": _(
+                                'Layer "{}" has an error with code "{}": {}'
+                            ).format(
+                                layer_name,
+                                layer_data.get("error_code"),
+                                layer_data.get("error_summary"),
+                            ),
+                            "solution": _(
+                                'Check the latest "process_projectfile" job logs for more info and reupload the project files with the required changes.'
+                            ),
                         }
                     )
                 # the layer is missing a primary key, warn it is going to be read-only
@@ -1315,9 +1608,7 @@ class Project(models.Model):
                                 "code": "layer_problem",
                                 "description": _(
                                     'Layer "{}" does not support the `primary key` attribute. The layer will be read-only on QField.'
-                                ).format(
-                                    layer_name,
-                                ),
+                                ).format(layer_name),
                                 "solution": _(
                                     "To make the layer editable on QField, store the layer data in a GeoPackage or PostGIS layer, using a single column for the primary key."
                                 ),
@@ -1336,8 +1627,8 @@ class Project(models.Model):
 
         return problems
 
-    @property
-    def status(self) -> Status:
+    @cached_property
+    def status(self) -> "Project.Status":
         # NOTE the status is NOT stored in the db, because it might be outdated
         if (
             self.jobs.filter(status__in=[Job.Status.QUEUED, Job.Status.STARTED])  # type: ignore
@@ -1349,7 +1640,7 @@ class Project(models.Model):
             max_premium_collaborators_per_private_project = self.owner.useraccount.current_subscription.plan.max_premium_collaborators_per_private_project
 
             # TODO use self.problems to get if there are project problems
-            if not self.project_filename or not self.project_details:
+            if not self.has_the_qgis_file or not self.project_details:
                 status = Project.Status.FAILED
                 status_code = Project.StatusCode.FAILED_PROCESS_PROJECTFILE
             elif (
@@ -1397,7 +1688,12 @@ class Project(models.Model):
         )
 
     def delete(self, *args, **kwargs):
-        if self.thumbnail_uri:
+        """Deletes the project and the thumbnail for the legacy storage.
+
+        Todo:
+            * Delete with QF-4963 Drop support for legacy storage
+        """
+        if self.legacy_thumbnail_uri:
             storage.delete_project_thumbnail(self)
 
         return super().delete(*args, **kwargs)
@@ -1417,7 +1713,15 @@ class Project(models.Model):
         logger.debug(f"Saving project {self}...")
 
         if recompute_storage:
-            self.file_storage_bytes = storage.get_project_file_storage_in_bytes(self.id)
+            # TODO Delete with QF-4963 Drop support for legacy storage
+            if self.uses_legacy_storage:
+                self.file_storage_bytes = storage.get_project_file_storage_in_bytes(
+                    self
+                )
+            else:
+                self.file_storage_bytes = self.files.all().aggregate(
+                    file_storage_bytes=Sum("versions__size", default=0)
+                )["file_storage_bytes"]
 
         # Ensure that the Project's storage_keep_versions is at least 1, and reflects the plan's default storage_keep_versions value.
         if not self.storage_keep_versions:
@@ -1425,11 +1729,19 @@ class Project(models.Model):
                 self.owner.useraccount.current_subscription.plan.storage_keep_versions
             )
 
-        assert (
-            self.storage_keep_versions >= 1
-        ), "If 0, storage_keep_versions mean that all file versions are deleted!"
+        assert self.storage_keep_versions >= 1, (
+            "If 0, storage_keep_versions mean that all file versions are deleted!"
+        )
 
         super().save(*args, **kwargs)
+
+    def get_file(self, filename: str) -> File:
+        return self.files.get_by_name(filename)  # type: ignore
+
+    def legacy_get_file(self, filename: str) -> utils.S3ObjectWithVersions:
+        files = filter(lambda f: f.latest.name == filename, self.legacy_files)
+
+        return next(files)
 
 
 class ProjectCollaboratorQueryset(models.QuerySet):
@@ -1764,6 +2076,30 @@ class Job(models.Model):
                 "The job ended in unknown state. Please verify the project is configured properly, try again and contact QFieldCloud support for more information."
             )
 
+    @property
+    def qgis_version(self) -> str | None:
+        """Returns QGIS app version used for the job.
+
+        The QGIS version is the one coming from the instanciated worker QGIS app.
+        The version number would be in `Major.Minor.Patch-NAME` format, e.g. 3.40.2-Bratislava
+
+        Returns:
+            QGIS version if found else None.
+        """
+        if not self.feedback:
+            return None
+
+        feedback_step_data = self.get_feedback_step_data("start_qgis_app")
+
+        if not feedback_step_data:
+            return None
+
+        if "qgis_version" in feedback_step_data["returns"]:
+            qgis_version = feedback_step_data["returns"]["qgis_version"]
+            return qgis_version
+
+        return None
+
     def check_can_be_created(self):
         from qfieldcloud.core.permissions_utils import (
             check_supported_regarding_owner_account,
@@ -1780,6 +2116,24 @@ class Job(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         return super().save(*args, **kwargs)
+
+    def get_feedback_step_data(self, step_name: str) -> dict[str, Any] | None:
+        """Extract a step data of a job's feedback.
+
+        Args:
+            step_name: name of the step to extract data from.
+
+        Returns:
+            data as dict if the step has been found, else None.
+        """
+        if isinstance(self.feedback, dict):
+            steps: list[dict[str, Any]] = self.feedback.get("steps", [])
+
+            for step in steps:
+                if step["id"] == step_name:
+                    return step
+
+        return None
 
 
 class PackageJob(Job):
@@ -1829,8 +2183,8 @@ class ApplyJob(Job):
 
 
 class ApplyJobDelta(models.Model):
-    apply_job_id: int
-    delta_id: int
+    apply_job_id: uuid.UUID
+    delta_id: uuid.UUID
 
     apply_job = models.ForeignKey(ApplyJob, on_delete=models.CASCADE)
     delta = models.ForeignKey(Delta, on_delete=models.CASCADE)

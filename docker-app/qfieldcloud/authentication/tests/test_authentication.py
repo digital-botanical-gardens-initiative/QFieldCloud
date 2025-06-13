@@ -1,11 +1,15 @@
 import logging
 from datetime import datetime
 
+import django.db.utils
+from django.core.files.base import ContentFile
+from django.urls import reverse
 from django.utils.timezone import now
+from rest_framework.test import APITransactionTestCase
+
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.models import Organization, Person, Team
 from qfieldcloud.core.tests.utils import setup_subscription_plans
-from rest_framework.test import APITransactionTestCase
 
 logging.disable(logging.CRITICAL)
 
@@ -17,7 +21,7 @@ class QfcTestCase(APITransactionTestCase):
         # Create a user
         self.user1 = Person.objects.create_user(username="user1", password="abc123")
 
-    def assertTokenMatch(self, token, payload):
+    def assertTokenMatch(self, token, payload, force_avatar_check: bool = False):
         expires_at = payload.pop("expires_at")
         avatar_url = payload.pop("avatar_url")
         self.assertDictEqual(
@@ -35,13 +39,14 @@ class QfcTestCase(APITransactionTestCase):
         )
         self.assertTrue(datetime.fromisoformat(expires_at) == token.expires_at)
         self.assertTrue(datetime.fromisoformat(expires_at) > now())
-        self.assertTrue(avatar_url is None or avatar_url.startswith("http"))
-        self.assertTrue(
-            avatar_url is None
-            or avatar_url.endswith(
-                f"/api/v1/files/public/users/{token.user.username}/avatar.svg"
+
+        if avatar_url is not None or force_avatar_check:
+            self.assertIsNotNone(avatar_url)
+            self.assertTrue(
+                avatar_url.startswith("http"),
+                f"Expected {avatar_url=} to start with http(s)",
             )
-        )
+            self.assertTrue(f"/api/v1/files/avatars/{token.user.username}/", avatar_url)
 
     def login(self, username, password, user_agent="", success=True):
         response = self.client.post(
@@ -78,6 +83,33 @@ class QfcTestCase(APITransactionTestCase):
         self.assertEqual(len(tokens), 1)
         self.assertLess(tokens[0].expires_at, now())
 
+    def test_login_case_insensitive(self):
+        response = self.login("user1", "abc123")
+        tokens = self.user1.auth_tokens.order_by("-created_at").all()
+
+        self.assertEqual(len(tokens), 1)
+        self.assertTokenMatch(tokens[0], response.json())
+        self.assertGreater(tokens[0].expires_at, now())
+
+        response = self.login("USER1", "abc123")
+        tokens = self.user1.auth_tokens.order_by("-created_at").all()
+
+        self.assertEqual(len(tokens), 2)
+        self.assertTokenMatch(tokens[0], response.json())
+        self.assertGreater(tokens[0].expires_at, now())
+
+    def test_login_with_avatar(self):
+        u2 = Person.objects.create_user(username="u2", password="u2")
+        u2.useraccount.avatar = ContentFile("<svg />", "avatar.svg")
+        u2.useraccount.save(update_fields=["avatar"])
+
+        response = self.login("u2", "u2")
+        tokens = u2.auth_tokens.order_by("-created_at").all()
+
+        self.assertEqual(len(tokens), 1)
+        self.assertTokenMatch(tokens[0], response.json(), force_avatar_check=True)
+        self.assertGreater(tokens[0].expires_at, now())
+
     def test_multiple_logins(self):
         # first single active token login
         response = self.login("user1", "abc123", "Mozilla/5.0 QGIS/32203")
@@ -112,6 +144,55 @@ class QfcTestCase(APITransactionTestCase):
         self.assertNotEqual(tokens[0], tokens[1])
         self.assertGreater(tokens[0].expires_at, now())
         self.assertGreater(tokens[1].expires_at, now())
+
+    def test_login_with_session_case_insensitive(self):
+        self.login_url = reverse("account_login")
+
+        response = self.client.post(
+            self.login_url, {"login": "user1", "password": "i_am_wrong"}, follow=True
+        )
+        # As we use a TemplateResponse we cannot check status_code 302 redirect,
+        # because it renders a template instead of returning an HTTP redirect response.
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        # Check if the response content contains the error message displayed in the UI after an unsuccessful login
+        self.assertContains(
+            response, "The username and/or password you specified are not correct."
+        )
+
+        response = self.client.post(
+            self.login_url,
+            {
+                "login": "user1",
+                "password": "abc123",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session["_auth_user_id"], str(self.user1.id))
+
+        response = self.client.post(
+            self.login_url,
+            {
+                "login": "USER1",
+                "password": "abc123",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session["_auth_user_id"], str(self.user1.id))
+
+    def test_case_insensitive_username_uniqueness(self):
+        with self.assertRaises(django.db.utils.IntegrityError):
+            Person.objects.create_user(username="USER1", password="abc123")
+
+        with self.assertRaises(django.db.utils.IntegrityError):
+            Person.objects.create_user(username="uSeR1", password="abc123")
+
+        users = Person.objects.filter(username__iexact="user1")
+        self.assertEqual(users.count(), 1)
 
     def test_client_type(self):
         # QFIELDSYNC login

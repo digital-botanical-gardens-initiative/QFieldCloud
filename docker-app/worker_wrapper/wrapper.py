@@ -14,6 +14,7 @@ import requests
 import sentry_sdk
 from constance import config
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.forms.models import model_to_dict
 from django.utils import timezone
@@ -32,6 +33,7 @@ from qfieldcloud.core.models import (
 )
 from qfieldcloud.core.utils import get_qgis_project_file
 from qfieldcloud.core.utils2 import storage
+from qfieldcloud.filestorage.models import File
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -299,7 +301,9 @@ class JobRun:
             settings.QFIELDCLOUD_QGIS_IMAGE_NAME,
             command,
             environment={
+                **extra_envvars,
                 "PGSERVICE_FILE_CONTENTS": pgservice_file_contents,
+                "QFIELDCLOUD_EXTRA_ENVVARS": json.dumps(sorted(extra_envvars.keys())),
                 "QFIELDCLOUD_TOKEN": token.key,
                 "QFIELDCLOUD_URL": settings.QFIELDCLOUD_WORKER_QFIELDCLOUD_URL,
                 "JOB_ID": self.job_id,
@@ -387,7 +391,7 @@ class PackageJobRun(JobRun):
     command = [
         "package",
         "%(project__id)s",
-        "%(project__project_filename)s",
+        "%(project__the_qgis_file_name)s",
         "%(project__packaging_offliner)s",
     ]
     data_last_packaged_at = None
@@ -407,41 +411,57 @@ class PackageJobRun(JobRun):
             )
         )
 
-        try:
-            project_id = str(self.job.project.id)
-            package_ids = storage.get_stored_package_ids(project_id)
-            job_ids = [
-                str(job["id"])
-                for job in Job.objects.filter(
-                    type=Job.Type.PACKAGE,
+        # TODO Delete with QF-4963 Drop support for legacy storage
+        if self.job.project.uses_legacy_storage:
+            try:
+                package_ids = storage.get_stored_package_ids(self.job.project)
+                job_ids = [
+                    str(job["id"])
+                    for job in Job.objects.filter(
+                        type=Job.Type.PACKAGE,
+                    )
+                    .exclude(id=self.job.id)
+                    .exclude(
+                        status__in=(Job.Status.FAILED, Job.Status.FINISHED),
+                    )
+                    .values("id")
+                ]
+
+                for package_id in package_ids:
+                    # keep the last package
+                    if package_id == str(self.job.project.last_package_job_id):
+                        continue
+
+                    # the job is still active, so it might be one of the new packages
+                    if package_id in job_ids:
+                        continue
+
+                    storage.delete_stored_package(self.job.project, package_id)
+            except Exception as err:
+                logger.error(
+                    "Failed to delete dangling packages, will be deleted via CRON later.",
+                    exc_info=err,
                 )
-                .exclude(id=self.job.id)
+        else:
+            delete_count = (
+                File.objects.filter(
+                    project=self.job.project,
+                    file_type=File.FileType.PACKAGE_FILE,
+                )
                 .exclude(
-                    status__in=(Job.Status.FAILED, Job.Status.FINISHED),
+                    package_job=self.job,
                 )
-                .values("id")
-            ]
+                .delete()
+            )
 
-            for package_id in package_ids:
-                # keep the last package
-                if package_id == str(self.job.project.last_package_job_id):
-                    continue
-
-                # the job is still active, so it might be one of the new packages
-                if package_id in job_ids:
-                    continue
-
-                storage.delete_stored_package(project_id, package_id)
-        except Exception as err:
-            logger.error(
-                "Failed to delete dangling packages, will be deleted via CRON later.",
-                exc_info=err,
+            logger.info(
+                f"Deleting {delete_count} package files from previous packages."
             )
 
 
 class DeltaApplyJobRun(JobRun):
     job_class = ApplyJob
-    command = ["delta_apply", "%(project__id)s", "%(project__project_filename)s"]
+    command = ["delta_apply", "%(project__id)s", "%(project__the_qgis_file_name)s"]
 
     def __init__(self, job_id: str) -> None:
         super().__init__(job_id)
@@ -566,14 +586,14 @@ class ProcessProjectfileJobRun(JobRun):
     command = [
         "process_projectfile",
         "%(project__id)s",
-        "%(project__project_filename)s",
+        "%(project__the_qgis_file_name)s",
     ]
 
     def get_context(self, *args) -> dict[str, Any]:
         context = super().get_context(*args)
 
-        if not context.get("project__project_filename"):
-            context["project__project_filename"] = get_qgis_project_file(
+        if not context.get("project__the_qgis_file_name"):
+            context["project__the_qgis_file_name"] = get_qgis_project_file(
                 context["project__id"]
             )
 
@@ -586,17 +606,30 @@ class ProcessProjectfileJobRun(JobRun):
         ]
 
         thumbnail_filename = self.shared_tempdir.joinpath("thumbnail.png")
+
         with open(thumbnail_filename, "rb") as f:
-            thumbnail_uri = storage.upload_project_thumbail(
-                project, f, "image/png", "thumbnail"
-            )
-        project.thumbnail_uri = project.thumbnail_uri or thumbnail_uri
+            # TODO Delete with QF-4963 Drop support for legacy storage
+            if project.uses_legacy_storage:
+                legacy_thumbnail_uri = storage.upload_project_thumbail(
+                    project, f, "image/png", "thumbnail"
+                )
+                project.legacy_thumbnail_uri = (
+                    project.legacy_thumbnail_uri or legacy_thumbnail_uri
+                )
+            else:
+                project.thumbnail = ContentFile(f.read(), "dummy_thumbnail_name.png")
+
         project.save(
             update_fields=(
                 "project_details",
-                "thumbnail_uri",
+                "legacy_thumbnail_uri",
+                "thumbnail",
             )
         )
+
+        # for non-legacy storage, keep only one thumbnail version if so.
+        if not project.uses_legacy_storage and project.thumbnail:
+            storage.purge_previous_thumbnails_versions(project)
 
     def after_docker_exception(self) -> None:
         project = self.job.project

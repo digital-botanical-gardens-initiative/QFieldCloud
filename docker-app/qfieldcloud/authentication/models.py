@@ -90,6 +90,7 @@ class AuthToken(models.Model):
         verbose_name = _("Token")
         verbose_name_plural = _("Tokens")
         ordering = ("-created_at",)
+        indexes = (models.Index(fields=["created_at"]),)
 
     def __str__(self):
         return self.key
@@ -98,9 +99,11 @@ class AuthToken(models.Model):
         if self.client_type in self.single_token_clients:
             # expire all other tokens
             now = timezone.now()
+
             AuthToken.objects.filter(
                 user=self.user,
                 client_type=self.client_type,
                 expires_at__gt=now,
             ).exclude(pk=self.pk).update(expires_at=now)
+
         return super().save(*args, **kwargs)

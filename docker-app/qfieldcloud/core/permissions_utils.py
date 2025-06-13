@@ -1,6 +1,7 @@
 from typing import Literal
 
 from django.utils.translation import gettext as _
+
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.models import (
     Delta,
@@ -152,8 +153,10 @@ def get_param_from_request(request, param):
     context, returns None otherwise"""
 
     result = request.data.get(param, None)
+
     if not result:
         result = request.parser_context["kwargs"].get(param, None)
+
     return result
 
 
@@ -803,6 +806,7 @@ def check_supported_regarding_owner_account(
 
     if not subscription.is_active:
         raise InactiveSubscriptionError
+
     if not account.storage_free_bytes > 0:
         raise QuotaError
 
@@ -816,6 +820,7 @@ def check_supported_regarding_owner_account(
                     "Owner's subscription plan does not support online vector layer datasource."
                 )
             )
+
     return True
 
 

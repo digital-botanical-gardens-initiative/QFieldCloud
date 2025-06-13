@@ -1,21 +1,23 @@
 import logging
+
+from rest_framework import status
+from rest_framework.test import APITestCase
+
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.models import (
-    TeamMember,
     Organization,
     OrganizationMember,
     Person,
     Team,
+    TeamMember,
 )
-from rest_framework import status
-from rest_framework.test import APITestCase
 
 from .utils import setup_subscription_plans
 
 logging.disable(logging.CRITICAL)
 
 
-class TeamsTestCase(APITestCase):
+class QfcTestCase(APITestCase):
     def setUp(self):
         setup_subscription_plans()
 
@@ -306,10 +308,12 @@ class TeamsTestCase(APITestCase):
                 {
                     "team": self.t1.teamname,
                     "organization": self.o1.username,
+                    "members": [],
                 },
                 {
                     "team": self.t2.teamname,
                     "organization": self.o1.username,
+                    "members": [],
                 },
             ],
         )
@@ -329,6 +333,7 @@ class TeamsTestCase(APITestCase):
             {
                 "team": self.t1.teamname,
                 "organization": self.o1.username,
+                "members": [],
             },
         )
 

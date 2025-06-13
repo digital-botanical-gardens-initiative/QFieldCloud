@@ -7,6 +7,8 @@
 asgiref==3.8.1
     # via
     #   django
+    #   django-allauth
+    #   django-axes
     #   django-countries
 attrs==24.2.0
     # via
@@ -14,11 +16,11 @@ attrs==24.2.0
     #   referencing
 beautifulsoup4==4.12.3
     # via django-bootstrap4
-boto3==1.35.20
+boto3==1.35.90
     # via -r /requirements/requirements.in
-boto3-stubs==1.35.20
+boto3-stubs==1.35.90
     # via -r /requirements/requirements.in
-botocore==1.35.20
+botocore==1.35.90
     # via
     #   boto3
     #   s3transfer
@@ -32,15 +34,13 @@ cffi==1.17.0
     # via cryptography
 charset-normalizer==3.3.2
     # via requests
-cryptography==43.0.0
+cryptography==44.0.0
     # via
     #   django-cryptography
     #   pyjwt
-defusedxml==0.7.1
-    # via python3-openid
-deprecated==1.2.14
+deprecated==1.2.18
     # via -r /requirements/requirements.in
-django==4.2.16
+django==4.2.19
     # via
     #   -r /requirements/requirements.in
     #   django-allauth
@@ -63,7 +63,6 @@ django==4.2.16
     #   django-nonrelated-inlines
     #   django-notifications-hq
     #   django-phonenumber-field
-    #   django-picklefield
     #   django-sri
     #   django-storages
     #   django-tables2
@@ -71,21 +70,23 @@ django==4.2.16
     #   djangorestframework
     #   drf-spectacular
     #   jsonfield
-django-allauth==0.44.0
+django-allauth[socialaccount]==65.4.1
     # via -r /requirements/requirements.in
 django-appconf==1.0.6
     # via django-cryptography
 django-auditlog==3.0.0
     # via -r /requirements/requirements.in
-django-axes==5.40.1
+django-axes==7.0.2
     # via -r /requirements/requirements.in
-django-bootstrap4==24.3
+django-bootstrap4==24.4
     # via -r /requirements/requirements.in
 django-classy-tags==4.1.0
     # via -r /requirements/requirements.in
+django-cleanup==9.0.0
+    # via -r /requirements/requirements.in
 django-common-helpers==0.9.2
     # via -r /requirements/requirements.in
-django-constance[database]==2.9.1
+django-constance[database]==4.3.2
     # via -r /requirements/requirements.in
 django-countries==7.6.1
     # via -r /requirements/requirements.in
@@ -95,17 +96,15 @@ django-cryptography==1.1
     # via -r /requirements/requirements.in
 django-currentuser==0.8.0
     # via -r /requirements/requirements.in
-django-debug-toolbar==4.4.6
+django-debug-toolbar==5.0.1
     # via -r /requirements/requirements.in
 django-extensions==3.2.3
     # via -r /requirements/requirements.in
-django-filter==24.3
+django-filter==25.1
     # via -r /requirements/requirements.in
 django-invitations==2.1.0
     # via -r /requirements/requirements.in
-django-ipware==7.0.1
-    # via django-axes
-django-jazzmin==3.0.0
+django-jazzmin==3.0.1
     # via -r /requirements/requirements.in
 django-log-request-id==2.1.0
     # via -r /requirements/requirements.in
@@ -119,23 +118,21 @@ django-nonrelated-inlines==0.2
     # via -r /requirements/requirements.in
 django-notifications-hq==1.8.3
     # via -r /requirements/requirements.in
-django-phonenumber-field==7.3.0
+django-phonenumber-field==8.0.0
     # via -r /requirements/requirements.in
-django-picklefield==3.2
-    # via django-constance
-django-sri==0.7.0
+django-sri==0.8.0
     # via -r /requirements/requirements.in
-django-storages==1.14.4
+django-storages==1.14.5
     # via -r /requirements/requirements.in
-django-tables2==2.7.0
+django-tables2==2.7.5
     # via -r /requirements/requirements.in
-django-timezone-field==7.0
+django-timezone-field==7.1
     # via -r /requirements/requirements.in
 djangorestframework==3.15.2
     # via
     #   -r /requirements/requirements.in
     #   drf-spectacular
-drf-spectacular==0.27.2
+drf-spectacular==0.28.0
     # via -r /requirements/requirements.in
 idna==3.8
     # via requests
@@ -145,7 +142,7 @@ jmespath==0.10.0
     # via
     #   boto3
     #   botocore
-json-log-formatter==1.0
+json-log-formatter==1.1
     # via -r /requirements/requirements.in
 jsonfield==3.1.0
     # via django-notifications-hq
@@ -153,17 +150,19 @@ jsonschema==4.23.0
     # via drf-spectacular
 jsonschema-specifications==2023.12.1
     # via jsonschema
-mypy-boto3-s3==1.35.16
+mypy-boto3-s3==1.35.81
     # via -r /requirements/requirements.in
 oauthlib==3.2.2
     # via requests-oauthlib
-phonenumbers==8.13.45
+phonenumbers==8.13.55
     # via -r /requirements/requirements.in
-psycopg2==2.9.9
+pillow==11.1.0
+    # via -r /requirements/requirements.in
+psycopg2==2.9.10
     # via -r /requirements/requirements.in
 pycparser==2.22
     # via cffi
-pyjwt[crypto]==2.9.0
+pyjwt[crypto]==2.10.1
     # via django-allauth
 pymemcache==4.0.0
     # via -r /requirements/requirements.in
@@ -171,10 +170,6 @@ python-dateutil==2.9.0.post0
     # via
     #   botocore
     #   django-auditlog
-python-ipware==3.0.0
-    # via django-ipware
-python3-openid==3.2.0
-    # via django-allauth
 pytz==2024.1
     # via django-notifications-hq
 pyyaml==6.0.2
@@ -229,6 +224,3 @@ urllib3==1.26.20
     #   sentry-sdk
 wrapt==1.16.0
     # via deprecated
-
-# The following packages are considered to be unsafe in a requirements file:
-# setuptools

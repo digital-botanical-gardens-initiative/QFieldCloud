@@ -16,6 +16,12 @@ from datetime import timedelta
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from .settings_utils import (
+    ConfigValidationError,
+    get_socialaccount_providers_config,
+    get_storages_config,
+)
+
 # QFieldCloud specific configuration
 QFIELDCLOUD_HOST = os.environ["QFIELDCLOUD_HOST"]
 
@@ -30,7 +36,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = int(os.environ.get("DEBUG", default=0))
+DEBUG = bool(int(os.environ.get("DEBUG", 0)))
 
 # if we are in debug, we need to update the internal IPS to make the
 # debug toolbar work within docker
@@ -74,6 +80,12 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
         "LOCATION": "memcached:11211",
+        "OPTIONS": {
+            "no_delay": True,
+            "ignore_exc": True,
+            "max_pool_size": 10,
+            "use_pooling": True,
+        },
     }
 }
 
@@ -102,6 +114,10 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
+    "allauth.socialaccount.providers.github",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.microsoft",
+    "allauth.socialaccount.providers.openid_connect",
     "storages",  # Integration with S3 Storages
     "invitations",
     "django_cron",
@@ -115,13 +131,15 @@ INSTALLED_APPS = [
     "qfieldcloud.subscription",
     "qfieldcloud.notifs",
     "qfieldcloud.authentication",
+    "qfieldcloud.filestorage",
     # 3rd party - keep at bottom to allow overrides
     "notifications",
     "axes",
     "migrate_sql",
     "constance",
-    "constance.backends.database",
     "django_extensions",
+    "bootstrap4",
+    "django_cleanup.apps.CleanupConfig",
 ]
 
 MIDDLEWARE = [
@@ -141,6 +159,8 @@ MIDDLEWARE = [
     "qfieldcloud.core.middleware.timezone.TimezoneMiddleware",
     "qfieldcloud.core.middleware.test.TestMiddleware",
     "axes.middleware.AxesMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
+    "qfieldcloud.core.middleware.qgis_auth.QGISAuthenticationMiddleware",
 ]
 
 CRON_CLASSES = [
@@ -224,21 +244,18 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/2.2/topics/i18n/
 
-LANGUAGE_CODE = "en"
+LANGUAGE_CODE = os.environ.get("QFIELDCLOUD_DEFAULT_LANGUAGE") or "en"
 
 TIME_ZONE = os.environ.get("QFIELDCLOUD_DEFAULT_TIME_ZONE") or "Europe/Zurich"
 
-USE_I18N = False
-
+USE_I18N = bool(int(os.environ.get("QFIELDCLOUD_USE_I18N", 1)))
 
 USE_TZ = True
 
 
 LANGUAGES = [
-    ("de", "German"),
     ("en", "English"),
-    ("fr", "French"),
-    ("it", "Italian"),
+    ("es", "Spanish"),
 ]
 
 # Static files (CSS, JavaScript, Images)
@@ -249,15 +266,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, "qfieldcloud", "core", "staticfiles"),
 ]
-STORAGES = {
-    "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
-    },
-}
-
 
 MEDIA_URL = "/mediafiles/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "mediafiles")
@@ -268,6 +276,42 @@ STORAGE_SECRET_ACCESS_KEY = os.environ.get("STORAGE_SECRET_ACCESS_KEY")
 STORAGE_BUCKET_NAME = os.environ.get("STORAGE_BUCKET_NAME")
 STORAGE_REGION_NAME = os.environ.get("STORAGE_REGION_NAME")
 STORAGE_ENDPOINT_URL = os.environ.get("STORAGE_ENDPOINT_URL")
+
+_storage_config = get_storages_config()
+
+STORAGES = {
+    **_storage_config["STORAGES"],
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
+    },
+}
+
+LEGACY_STORAGE_NAME = _storage_config["LEGACY_STORAGE_NAME"]
+
+# Maximum filename length in characters
+# NOTE the keys on S3 cannot be longer than 1024 _bytes_, see https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html
+# NOTE the files on Windows cannot be longer than 260 _chars_ by default, see https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file?redirectedfrom=MSDN#maximum-path-length-limitation
+# NOTE minio limit is 255 _chars_ per filename segment, read https://min.io/docs/minio/linux/operations/concepts/thresholds.html#id1
+STORAGE_FILENAME_MAX_CHAR_LENGTH = 255
+
+# Filename validator regex.
+# Should filter out all the names that have reserved characters and words for both Linux and Windows.
+STORAGES_FILENAME_VALIDATION_REGEX = (
+    r'^(?!.*[<>:"/\\|?*])'
+    r"(?!(?:COM[0-9]|CON|LPT[0-9]|NUL|PRN|AUX|com[0-9]|con|lpt[0-9]|nul|prn|aux)$)"
+    # dynamically set the max char length
+    r'[^\\\/:*"?<>|]{1,' + str(STORAGE_FILENAME_MAX_CHAR_LENGTH) + "}"
+    r"(?<![\s\.])$"
+)
+
+STORAGES_PROJECT_DEFAULT_STORAGE = (
+    os.environ.get("STORAGES_PROJECT_DEFAULT_STORAGE") or "default"
+)
+
+if STORAGES_PROJECT_DEFAULT_STORAGE not in STORAGES:
+    raise ConfigValidationError(
+        f"Missing {STORAGES_PROJECT_DEFAULT_STORAGE=} from the `STORAGES` configuration, available storages: {STORAGES.keys()}"
+    )
 
 AUTH_USER_MODEL = "core.User"
 
@@ -294,6 +338,7 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 SITE_ID = 1
 
 LOGIN_URL = "account_login"
+LOGIN_REDIRECT_URL = "index"
 
 # Sentry configuration
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
@@ -301,7 +346,13 @@ if SENTRY_DSN:
     SENTRY_SAMPLE_RATE = float(os.environ.get("SENTRY_SAMPLE_RATE", 1))
 
     def before_send(event, hint):
+        from rest_framework.exceptions import MethodNotAllowed, UnsupportedMediaType
+        from rest_framework.exceptions import ValidationError as RestValidationError
+
         from qfieldcloud.core.exceptions import (
+            AuthenticationViaTokenFailedError,
+            InvalidRangeError,
+            MultipleProjectsError,
             ProjectAlreadyExistsError,
             ValidationError,
         )
@@ -310,8 +361,6 @@ if SENTRY_DSN:
             PlanInsufficientError,
             QuotaError,
         )
-        from rest_framework.exceptions import UnsupportedMediaType
-        from rest_framework.exceptions import ValidationError as RestValidationError
 
         ignored_exceptions = (
             ValidationError,
@@ -321,6 +370,14 @@ if SENTRY_DSN:
             InactiveSubscriptionError,
             RestValidationError,
             UnsupportedMediaType,
+            # Purely a client error
+            MethodNotAllowed,
+            # the client sent invalid authentication token, the user should fix his token
+            AuthenticationViaTokenFailedError,
+            # The client sent the wrong/unsupported HTTP `Range` header that we cannot satisfy
+            InvalidRangeError,
+            # the client attempted to upload a new .qgs/.qgz file, but the project already has one. The user must delete the QGIS file first before reuploading it.
+            MultipleProjectsError,
         )
 
         if "exc_info" in hint:
@@ -359,28 +416,102 @@ SENTRY_REPORT_FULL_BODY = True
 
 # Django allauth configurations
 # https://django-allauth.readthedocs.io/en/latest/configuration.html
-ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+ACCOUNT_LOGIN_METHODS = {"username", "email"}
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 3
 ACCOUNT_EMAIL_SUBJECT_PREFIX = ""
 
+# Django allauth's RateLimiter configuration
+# https://docs.allauth.org/en/latest/account/rate_limits.html
+ACCOUNT_RATE_LIMITS = False
+
 # Choose one of "mandatory", "optional", or "none".
 # For local development and test use "optional" or "none"
 ACCOUNT_EMAIL_VERIFICATION = os.environ.get("ACCOUNT_EMAIL_VERIFICATION")
-ACCOUNT_PRESERVE_USERNAME_CASING = False
+
+# This setting determines whether the username is stored in lowercase (False) or whether its casing is to be preserved (True).
+# Note that when casing is preserved, potentially expensive __iexact lookups are performed when filter on username.
+# For now, the default is set to True to maintain backwards compatibility.
+# See https://docs.allauth.org/en/dev/account/configuration.html
+ACCOUNT_PRESERVE_USERNAME_CASING = True
 ACCOUNT_USERNAME_REQUIRED = True
 ACCOUNT_ADAPTER = "qfieldcloud.core.adapters.AccountAdapter"
 ACCOUNT_LOGOUT_ON_GET = True
+
+# Django allauth's social account configuration
+# https://docs.allauth.org/en/dev/socialaccount/configuration.html
+SOCIALACCOUNT_ADAPTER = "qfieldcloud.core.adapters.SocialAccountAdapter"
+SOCIALACCOUNT_QUERY_EMAIL = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+SOCIALACCOUNT_LOGIN_ON_GET = True
+
+SOCIALACCOUNT_PROVIDERS = get_socialaccount_providers_config()
+
+QFIELDCLOUD_PASSWORD_LOGIN_IS_ENABLED = bool(
+    int(os.environ.get("QFIELDCLOUD_PASSWORD_LOGIN_IS_ENABLED", 0))
+)
+
+QFIELDCLOUD_SSO_PROVIDER_STYLES = {
+    "keycloak": {
+        # https://github.com/keycloak/keycloak-misc/tree/main/logo
+        "required": False,
+        "light": {
+            "logo": "sso/keycloak.svg",
+            "color_fill": "#FFFFFF",
+            "color_stroke": "#747775",
+            "color_text": "#1F1F1F",
+        },
+        "dark": {
+            "logo": "sso/keycloak.svg",
+            "color_fill": "#131314",
+            "color_stroke": "#8E918F",
+            "color_text": "#E3E3E3",
+        },
+    },
+    "google": {
+        # https://developers.google.com/identity/branding-guidelines
+        "required": True,
+        "light": {
+            "logo": "sso/google.svg",
+            "color_fill": "#FFFFFF",
+            "color_stroke": "#747775",
+            "color_text": "#1F1F1F",
+        },
+        "dark": {
+            "logo": "sso/google.svg",
+            "color_fill": "#131314",
+            "color_stroke": "#8E918F",
+            "color_text": "#E3E3E3",
+        },
+    },
+    "github": {
+        # https://github.com/logos
+        "required": False,
+        "light": {
+            "logo": "sso/github-light.svg",
+            "color_fill": "#FFFFFF",
+            "color_stroke": "#747775",
+            "color_text": "#1F1F1F",
+        },
+        "dark": {
+            "logo": "sso/github-dark.svg",
+            "color_fill": "#131314",
+            "color_stroke": "#8E918F",
+            "color_text": "#E3E3E3",
+        },
+    },
+}
 
 # Django axes configuration
 # https://django-axes.readthedocs.io/en/latest/4_configuration.html
 ###########################
 # The integer number of login attempts allowed before a record is created for the failed logins. Default: 3
 AXES_FAILURE_LIMIT = 5
-# If True, only lock based on username, and never lock based on IP if attempts exceed the limit. Otherwise utilize the existing IP and user locking logic. Default: False
-AXES_ONLY_USER_FAILURES = True
+# Configures the limiter to handle username only (see https://django-axes.readthedocs.io/en/latest/2_installation.html#version-7-breaking-changes-and-upgrading-from-django-axes-version-6)
+AXES_LOCKOUT_PARAMETERS = ["username"]
 # If set, defines a period of inactivity after which old failed login attempts will be cleared. If an integer, will be interpreted as a number of hours. Default: None
-AXES_COOLOFF_TIME = timedelta(minutes=30)
+AXES_COOLOFF_TIME = lambda _request: timedelta(minutes=30)  # noqa: E731
 # If True, a successful login will reset the number of failed logins. Default: False
 AXES_RESET_ON_SUCCESS = True
 
@@ -485,27 +616,35 @@ DEBUG_TOOLBAR_CONFIG = {
 
 QFIELDCLOUD_ADMIN_URI = os.environ.get("QFIELDCLOUD_ADMIN_URI", "admin/")
 
-CONSTANCE_BACKEND = "qfieldcloud.core.constance_backends.DatabaseBackend"
+CONSTANCE_BACKEND = "constance.backends.database.DatabaseBackend"
 CONSTANCE_DATABASE_CACHE_BACKEND = "default"
 CONSTANCE_DATABASE_CACHE_AUTOFILL_TIMEOUT = 60 * 60 * 24
 CONSTANCE_CONFIG = {
     "WORKER_TIMEOUT_S": (
         600,
         "Timeout of the workers before being terminated by the wrapper in seconds.",
+        int,
     ),
     "WORKER_QGIS_MEMORY_LIMIT": (
         "1000m",
         "Maximum memory for each QGIS worker container.",
+        str,
     ),
     "SENTRY_REQUEST_MAX_SIZE_TO_SEND": (
         0,
         "Maximum request size to send the raw request to Sentry. Value 0 disables the raw request copy.",
+        int,
     ),
     "WORKER_QGIS_CPU_SHARES": (
         512,
         "Share of CPUs for each QGIS worker container. By default all containers have value 1024 set by docker.",
+        int,
     ),
-    "TRIAL_PERIOD_DAYS": (28, "Days in which the trial period expires."),
+    "TRIAL_PERIOD_DAYS": (
+        28,
+        "Days in which the trial period expires.",
+        int,
+    ),
 }
 CONSTANCE_ADDITIONAL_FIELDS = {
     "textarea": [
@@ -524,6 +663,9 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Debug": ("SENTRY_REQUEST_MAX_SIZE_TO_SEND",),
     "Subscription": ("TRIAL_PERIOD_DAYS",),
 }
+
+# Minimum number of bytes to ask a range when requesting a file part, otherwise a HTTP 416 is returned. Set to 0 to allow any number of bytes in the range.
+QFIELDCLOUD_MINIMUM_RANGE_HEADER_LENGTH = 1000000
 
 # Name of the qgis docker image used as a worker by worker_wrapper
 QFIELDCLOUD_QGIS_IMAGE_NAME = os.environ["QFIELDCLOUD_QGIS_IMAGE_NAME"]
@@ -623,18 +765,16 @@ AUDITLOG_INCLUDE_TRACKING_MODELS = [
     {
         "model": "subscription.subscription",
     },
+    {
+        "model": "filestorage.file",
+        "exclude_fields": ["latest_version_count"],
+    },
+    {
+        "model": "filestorage.fileversion",
+        # exclude the `BinaryField` instances until https://github.com/jazzband/django-auditlog/pull/689 is merged and released
+        "exclude_fields": ["md5sum", "sha256sum"],
+    },
 ]
-
-
-# Django auditlog version 3.0.0 migrates the `changes` from `text` to `jsonb` datatype.
-# Since QFieldCloud has millions of audits, the migration will lock the database for hours.
-# This problem was recognized by the developers and they added two step migration: there are two fields to store the `changes`, the old text based one and the new json based new one.
-# TODO remove the `AUDITLOG_TWO_STEP_MIGRATION` and `AUDITLOG_USE_TEXT_CHANGES_IF_JSON_IS_NOT_PRESENT` settings in the future, after `manage.py auditlogmigratejson` has been called.
-# TODO THe `auditlog_logentry.changes_text` shall be removed manually after that.
-# Read more: https://django-auditlog.readthedocs.io/en/latest/upgrade.html
-AUDITLOG_TWO_STEP_MIGRATION = True
-AUDITLOG_USE_TEXT_CHANGES_IF_JSON_IS_NOT_PRESENT = True
-
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "QFieldCloud JSON API",

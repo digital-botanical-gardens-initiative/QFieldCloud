@@ -21,7 +21,7 @@ class QFieldCloudException(Exception):
 
     code = "unknown_error"
     message = "QFieldcloud Unknown Error"
-    status_code = None
+    status_code: int | None = None
     log_as_error = True
 
     def __init__(self, detail="", status_code=None):
@@ -38,14 +38,6 @@ class QFieldCloudException(Exception):
 
     def __str__(self):
         return self.message
-
-
-class StatusNotOkError(QFieldCloudException):
-    """Raised when some parts of QFieldCloud are not working as expected"""
-
-    code = "status_not_ok"
-    message = "Status not ok"
-    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
 
 class AuthenticationFailedError(QFieldCloudException):
@@ -106,7 +98,15 @@ class MultipleContentsError(QFieldCloudException):
 
     code = "multiple_contents"
     message = "Multiple contents"
-    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    status_code = status.HTTP_400_BAD_REQUEST
+
+
+class ExplicitDeletionOfLastFileVersionError(QFieldCloudException):
+    """Raised when the only file version is explicitly requested for deletion."""
+
+    code = "explicit_deletion_of_last_version"
+    message = "Explicit deletion of last file version is not allowed!"
+    status_code = status.HTTP_400_BAD_REQUEST
 
 
 class ObjectNotFoundError(QFieldCloudException):
@@ -115,7 +115,7 @@ class ObjectNotFoundError(QFieldCloudException):
 
     code = "object_not_found"
     message = "Object not found"
-    status_code = status.HTTP_400_BAD_REQUEST
+    status_code = status.HTTP_404_NOT_FOUND
     log_as_error = False
 
 
@@ -152,7 +152,7 @@ class RestrictedProjectModificationError(QFieldCloudException):
 
     code = "restricted_project_modification"
     message = "Restricted project modification"
-    status_code = status.HTTP_400_BAD_REQUEST
+    status_code = status.HTTP_403_FORBIDDEN
 
 
 class DeltafileValidationError(QFieldCloudException):
@@ -188,20 +188,15 @@ class InvalidJobError(QFieldCloudException):
     status_code = status.HTTP_400_BAD_REQUEST
 
 
-class QGISPackageError(QFieldCloudException):
-    """Raised when the QGIS package of a project fails"""
-
-    code = "qgis_package_error"
-    message = "QGIS package failed"
-    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-
-    if "Unable to open file with QGIS" in message:
-        message = "QGIS is unable to open the QGIS project"
-
-
 class ProjectAlreadyExistsError(QFieldCloudException):
     """Raised when a quota limitation is hit"""
 
     code = "project_already_exists"
     message = "This user already owns a project with the same name."
     status_code = status.HTTP_400_BAD_REQUEST
+
+
+class InvalidRangeError(QFieldCloudException):
+    code = "invalid_http_range"
+    message = "The provided HTTP range header is invalid."
+    status_code = status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE

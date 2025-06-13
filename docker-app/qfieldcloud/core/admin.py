@@ -11,10 +11,10 @@ from allauth.account.admin import EmailAddressAdmin as EmailAddressAdminBase
 from allauth.account.forms import EmailAwarePasswordResetTokenGenerator
 from allauth.account.models import EmailAddress
 from allauth.account.utils import user_pk_to_url_str
-from allauth.socialaccount.models import SocialAccount, SocialApp, SocialToken
 from auditlog.admin import LogEntryAdmin as BaseLogEntryAdmin
 from auditlog.filters import ResourceTypeFilter
 from auditlog.models import ContentType, LogEntry
+from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.templatetags.admin_urls import admin_urlname
@@ -37,6 +37,8 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.cache import never_cache
 from invitations.admin import InvitationAdmin as InvitationAdminBase
 from invitations.utils import get_invitation_model
+from rest_framework.authtoken.models import TokenProxy
+
 from qfieldcloud.core import exceptions
 from qfieldcloud.core.models import (
     ApplyJob,
@@ -57,8 +59,8 @@ from qfieldcloud.core.models import (
 )
 from qfieldcloud.core.paginators import LargeTablePaginator
 from qfieldcloud.core.templatetags.filters import filesizeformat10
+from qfieldcloud.core.utils import get_file_storage_choices
 from qfieldcloud.core.utils2 import delta_utils, jobs, pg_service_file
-from rest_framework.authtoken.models import TokenProxy
 
 admin.site.unregister(LogEntry)
 
@@ -78,6 +80,7 @@ class NoPkOrderChangeList(ChangeList):
         order_fields = super().get_ordering(request, queryset)
         if len(order_fields) > 1 and "-pk" in order_fields:
             order_fields.remove("-pk")
+
         return order_fields
 
 
@@ -108,6 +111,7 @@ class QFieldCloudModelAdmin(  # type: ignore
         """
         if hasattr(self, "has_direct_delete_permission"):
             perm = f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}"
+
             if request.resolver_match.view_name.startswith(perm):
                 if callable(self.has_direct_delete_permission):
                     return self.has_direct_delete_permission(request, obj)
@@ -145,9 +149,6 @@ def admin_urlname_by_obj(value, arg):
 # Unregister admins from other Django apps
 admin.site.unregister(Invitation)
 admin.site.unregister(TokenProxy)
-admin.site.unregister(SocialAccount)
-admin.site.unregister(SocialApp)
-admin.site.unregister(SocialToken)
 admin.site.unregister(EmailAddress)
 
 UserEmailDetails = namedtuple(
@@ -331,7 +332,7 @@ def search_parser(
     return custom_filter
 
 
-def model_admin_url(obj, name: str = None) -> str:
+def model_admin_url(obj, name: str | None = None) -> str:
     url = resolve_url(admin_urlname_by_obj(obj, SafeText("change")), obj.pk)
     return format_html('<a href="{}">{}</a>', url, name or str(obj))
 
@@ -367,16 +368,19 @@ class MemberOrganizationInline(admin.TabularInline):
     def has_add_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type in (User.Type.PERSON, User.Type.ORGANIZATION)
 
     def has_direct_delete_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type in (User.Type.PERSON, User.Type.ORGANIZATION)
 
     def has_change_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type in (User.Type.PERSON, User.Type.ORGANIZATION)
 
 
@@ -387,16 +391,19 @@ class MemberTeamInline(admin.TabularInline):
     def has_add_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type in (User.Type.PERSON, User.Type.ORGANIZATION)
 
     def has_direct_delete_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type in (User.Type.PERSON, User.Type.ORGANIZATION)
 
     def has_change_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type in (User.Type.PERSON, User.Type.ORGANIZATION)
 
 
@@ -434,16 +441,19 @@ class UserProjectCollaboratorInline(admin.TabularInline):
     def has_add_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type == User.Type.PERSON
 
     def has_direct_delete_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type == User.Type.PERSON
 
     def has_change_permission(self, request, obj):
         if obj is None:
             return True
+
         return obj.type == User.Type.PERSON
 
 
@@ -540,6 +550,7 @@ class PersonAdmin(QFieldCloudModelAdmin):
                 name="password_reset_url",
             ),
         ]
+
         return urls
 
     @method_decorator(never_cache)
@@ -550,7 +561,7 @@ class PersonAdmin(QFieldCloudModelAdmin):
         user = self.get_object(request, user_id)
         if user is None:
             raise Http404(
-                _("%(name)s object with primary key %(key)r does " "not exist.")
+                _("%(name)s object with primary key %(key)r does not exist.")
                 % {
                     "name": self.model._meta.verbose_name,
                     "key": escape(user_id),
@@ -565,6 +576,7 @@ class PersonAdmin(QFieldCloudModelAdmin):
                 "key": token_generator.make_token(user),
             },
         )
+
         return TemplateResponse(
             request,
             "admin/password_reset_url.html",
@@ -623,6 +635,7 @@ class ProjectSecretForm(ModelForm):
     def get_initial_for_field(self, field, field_name):
         if self.instance.pk and field_name == "value":
             return ""
+
         return super().get_initial_for_field(field, field_name)
 
     def clean(self):
@@ -632,9 +645,11 @@ class ProjectSecretForm(ModelForm):
             type = self.instance.type
         else:
             type = cleaned_data.get("type")
+
         if type == Secret.Type.PGSERVICE:
             # validate the pg_service.conf
             value = cleaned_data.get("value")
+
             if value:
                 try:
                     pg_service_file.validate_pg_service_conf(value)
@@ -686,6 +701,7 @@ class SecretAdmin(QFieldCloudModelAdmin):
         # only set created_by during the first save
         if not change:
             obj.created_by = request.user
+
         super().save_model(request, obj, form, change)
 
     def get_changeform_initial_data(self, request):
@@ -745,8 +761,16 @@ class ProjectForm(ModelForm):
 
     class Meta:
         model = Project
-        widgets = {"project_filename": widgets.TextInput()}
+        widgets = {"the_qgis_file_name": widgets.TextInput()}
         fields = "__all__"  # required for Django 3.x
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["attachments_file_storage"] = forms.ChoiceField(
+            choices=get_file_storage_choices(), required=True
+        )
+        if self.instance.has_attachments_files:
+            self.fields["attachments_file_storage"].disabled = True
 
 
 class ProjectAdmin(QFieldCloudModelAdmin):
@@ -759,6 +783,7 @@ class ProjectAdmin(QFieldCloudModelAdmin):
         "description",
         "created_at",
         "updated_at",
+        "is_locked",
     )
     list_filter = (
         "is_public",
@@ -774,7 +799,7 @@ class ProjectAdmin(QFieldCloudModelAdmin):
         "owner",
         "status",
         "status_code",
-        "project_filename",
+        "the_qgis_file_name",
         "overwrite_conflicts",
         "has_restricted_projectfiles",
         "file_storage_bytes",
@@ -785,6 +810,12 @@ class ProjectAdmin(QFieldCloudModelAdmin):
         "data_last_updated_at",
         "data_last_packaged_at",
         "project_details__pre",
+        "is_locked",
+        "is_featured",
+        "file_storage",
+        "file_storage_migrated_at",
+        "attachments_file_storage",
+        "is_attachment_download_on_demand",
         "project_files",
     )
     readonly_fields = (
@@ -797,8 +828,14 @@ class ProjectAdmin(QFieldCloudModelAdmin):
         "data_last_updated_at",
         "data_last_packaged_at",
         "project_details__pre",
+        "is_locked",
+        "file_storage",
+        "file_storage_migrated_at",
     )
-    inlines = (ProjectCollaboratorInline, ProjectSecretInline)
+    inlines = (
+        ProjectSecretInline,
+        ProjectCollaboratorInline,
+    )
     search_fields = (
         "id",
         "name__icontains",
@@ -943,6 +980,7 @@ class JobAdmin(QFieldCloudModelAdmin):
         "status",
         "error_type",
         "type",
+        "qgis_version",
         "created_at",
         "updated_at",
         "started_at",
@@ -961,8 +999,10 @@ class JobAdmin(QFieldCloudModelAdmin):
 
     def get_object(self, request, object_id, from_field=None):
         obj = super().get_object(request, object_id, from_field)
+
         if obj and obj.type == Job.Type.DELTA_APPLY:
             obj = ApplyJob.objects.get(pk=obj.pk)
+
         return obj
 
     def get_inline_instances(self, request, obj=None):
@@ -1214,14 +1254,14 @@ class DeltaAdmin(QFieldCloudModelAdmin):
         return super().response_change(request, delta)
 
     def apply_delta(self, request, delta):
-        if not delta.project.project_filename:
+        if not delta.project.has_the_qgis_file:
             self.message_user(request, "Missing project file")
             raise exceptions.NoQGISProjectError()
 
         if not jobs.apply_deltas(
             delta.project,
             request.user,
-            delta.project.project_filename,
+            delta.project.the_qgis_file_name,
             delta.project.overwrite_conflicts,
             delta_ids=[str(delta.id)],
         ):
@@ -1296,8 +1336,8 @@ class OrganizationAdmin(QFieldCloudModelAdmin):
     inlines = (
         UserAccountInline,
         GeodbInline,
-        OrganizationMemberInline,
         ProjectInline,
+        OrganizationMemberInline,
         TeamInline,
     )
     fields = (
@@ -1338,8 +1378,10 @@ class OrganizationAdmin(QFieldCloudModelAdmin):
     def active_users_links(self, instance) -> str:
         persons = instance.useraccount.current_subscription.active_users
         userlinks = "<p> - </p>"
+
         if persons:
             userlinks = "<br>".join(model_admin_url(p, p.username) for p in persons)
+
         help_text = """
         <p style="font-size: 11px; color: var(--body-quiet-color)">
             Active members have triggererd at least one job or uploaded at least one delta in the current billing period.
@@ -1427,6 +1469,7 @@ class TeamAdmin(QFieldCloudModelAdmin):
     def save_model(self, request, obj, form, change):
         if not obj.username.startswith("@"):
             obj.username = f"@{obj.team_organization.username}/{obj.username}"
+
         obj.save()
 
     def get_form(

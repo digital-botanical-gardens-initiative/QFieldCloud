@@ -7,6 +7,8 @@ from django_cron import CronJobBase, Schedule
 from invitations.utils import get_invitation_model
 from sentry_sdk import capture_message
 
+from qfieldcloud.filestorage.models import File
+
 from ..core.models import ApplyJob, ApplyJobDelta, Delta, Job, Project
 from ..core.utils2 import storage
 from .invitations_utils import send_invitation
@@ -39,7 +41,7 @@ class ResendFailedInvitationsJob(CronJobBase):
                 logger.error(err)
 
         logger.info(
-            f'Resend {len(invitation_emails)} previously failed invitation(s) to: {", ".join(invitation_emails)}'
+            f"Resend {len(invitation_emails)} previously failed invitation(s) to: {', '.join(invitation_emails)}"
         )
 
 
@@ -116,16 +118,28 @@ class DeleteObsoleteProjectPackagesJob(CronJobBase):
         ]
 
         for project in projects:
-            project_id = str(project.id)
-            package_ids = storage.get_stored_package_ids(project_id)
+            # TODO Delete with QF-4963 Drop support for legacy storage
+            if project.uses_legacy_storage:
+                project_id = str(project.id)
+                package_ids = storage.get_stored_package_ids(project_id)
 
-            for package_id in package_ids:
-                # keep the last package
-                if package_id == str(project.last_package_job_id):
-                    continue
+                for package_id in package_ids:
+                    # keep the last package
+                    if package_id == str(project.last_package_job_id):
+                        continue
 
-                # the job is still active, so it might be one of the new packages
-                if package_id in job_ids:
-                    continue
+                    # the job is still active, so it might be one of the new packages
+                    if package_id in job_ids:
+                        continue
 
-                storage.delete_stored_package(project_id, package_id)
+                    storage.delete_stored_package(project, package_id)
+
+            else:
+                delete_count = File.objects.filter(
+                    project=project,
+                    package_job_id__in=job_ids,
+                ).delete()
+
+                logger.warning(
+                    f"Cron have identified and deleted {delete_count} package files from previous packages!"
+                )

@@ -1,6 +1,5 @@
 from django.db.models import Q
 from django.utils.translation import gettext as _
-
 from qfieldcloud.core import invitations_utils as invitation
 from qfieldcloud.core import permissions_utils as perms
 from qfieldcloud.core.models import Person, Project, ProjectCollaborator, Team
@@ -12,12 +11,12 @@ def create_collaborator(
     """Creates a new collaborator (qfieldcloud.core.ProjectCollaborator) if possible
 
     Args:
-        project: the project to add collaborator to
-        user: the user to be added as collaborator
-        created_by: the user that initiated the collaborator creation
+        project (Project): the project to add collaborator to
+        user (Person | Team): the user to be added as collaborator
+        created_by (Person): the user that initiated the collaborator creation
 
     Returns:
-        success, message - whether the collaborator creation was success and explanation message of the outcome
+        tuple[bool, str]: success, message - whether the collaborator creation was success and explanation message of the outcome
     """
     success, message = False, ""
     user_type_name = "Team" if isinstance(user, Team) else "User"
@@ -58,12 +57,12 @@ def create_collaborator_by_username_or_email(
     """Creates a new collaborator (qfieldcloud.core.ProjectCollaborator) if possible
 
     Args:
-        project: the project to add collaborator to
-        user: the username or email to be added as collaborator or invited to join QFieldCloud
-        created_by: the user that initiated the collaborator creation
+        project (Project): the project to add collaborator to
+        user (str): the username or email to be added as collaborator or invited to join QFieldCloud
+        created_by (Person): the user that initiated the collaborator creation
 
     Returns:
-        success, message - whether the collaborator creation was success and explanation message of the outcome
+        tuple[bool, str]: success, message - whether the collaborator creation was success and explanation message of the outcome
     """
     success, message = False, ""
     users = list(

@@ -1,19 +1,17 @@
 from django.urls import include, path
-from rest_framework.routers import DefaultRouter
-
 from qfieldcloud.core.views import (
     collaborators_views,
     deltas_views,
+    files_views,
     jobs_views,
     members_views,
     package_views,
     projects_views,
     status_views,
-    teams_views,
     users_views,
+    teams_views,
 )
-from qfieldcloud.core.views.accounts_views import resend_confirmation_email
-from qfieldcloud.filestorage.urls import urlpatterns as filestorage_urlpatterns
+from rest_framework.routers import DefaultRouter
 
 router = DefaultRouter()
 router.register(r"projects", projects_views.ProjectViewSet, basename="project")
@@ -42,7 +40,6 @@ organizations/<str:organization_name>/teams/<str:team_name>/members/
 """
 
 urlpatterns = [
-    *filestorage_urlpatterns,
     path("projects/public/", projects_views.PublicProjectsListView.as_view()),
     path("", include(router.urls)),
     path("users/", users_views.ListUsersView.as_view()),
@@ -59,17 +56,33 @@ urlpatterns = [
         "collaborators/<uuid:projectid>/<str:username>/",
         collaborators_views.GetUpdateDestroyCollaboratorView.as_view(),
     ),
+    path("files/<uuid:projectid>/", files_views.ListFilesView.as_view()),
+    path(
+        "files/<uuid:projectid>/<path:filename>/",
+        files_views.DownloadPushDeleteFileView.as_view(),
+        name="project_file_download",
+    ),
+    path(
+        "files/meta/<uuid:projectid>/<path:filename>",
+        files_views.ProjectMetafilesView.as_view(),
+        name="project_metafiles",
+    ),
+    path(
+        "files/public/<path:filename>",
+        files_views.PublicFilesView.as_view(),
+        name="public_files",
+    ),
     path(
         "packages/<uuid:project_id>/latest/",
-        package_views.compatibility_latest_package_view,
+        package_views.LatestPackageView.as_view(),
     ),
     path(
         "packages/<uuid:project_id>/latest/files/<path:filename>/",
-        package_views.compatibility_package_download_files_view,
+        package_views.LatestPackageDownloadFilesView.as_view(),
     ),
     path(
         "packages/<uuid:project_id>/<uuid:job_id>/files/<path:filename>/",
-        package_views.compatibility_package_upload_files_view,
+        package_views.PackageUploadFilesView.as_view(),
     ),
     path("members/<str:organization>/", members_views.ListCreateMembersView.as_view()),
     path(
@@ -100,8 +113,7 @@ urlpatterns = [
     ),
     path(
         "organizations/<str:organization_name>/teams/<str:team_name>/members/<str:member_username>/",
-        teams_views.DestroyTeamMemberView.as_view(),
-        name="team_member_destroy",
+        teams_views.GetUpdateDestroyTeamMemberView.as_view(),
+        name="team_member_retrieve_update_destroy",
     ),
-    path("resend-confirmation/", resend_confirmation_email, name="resend_confirmation"),
 ]

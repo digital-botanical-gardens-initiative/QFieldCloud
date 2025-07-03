@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from auditlog.models import LogEntry
@@ -9,10 +10,18 @@ def audit(
     instance,
     action: LogEntry.Action,
     changes: dict[str, Any] | list[Any] | str | None = None,
-    actor: User | None = None,
-    remote_addr: str | None = None,
-    additional_data: Any | None = None,
+    actor: User = None,
+    remote_addr: str = None,
+    additional_data: Any = None,
 ):
+    changes_json = None
+
+    try:
+        if changes is not None:
+            changes_json = json.dumps(changes)
+    except Exception:
+        changes_json = json.dumps(str(changes))
+
     if actor is None:
         actor = get_current_authenticated_user()
     elif isinstance(actor, AnonymousUser):
@@ -23,7 +32,7 @@ def audit(
     return LogEntry.objects.log_create(
         instance,
         action=action,
-        changes=changes,
+        changes=changes_json,
         actor_id=actor_id,
         remote_addr=remote_addr,
         additional_data=additional_data,

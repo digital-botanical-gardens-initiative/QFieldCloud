@@ -75,10 +75,8 @@ class RetrieveUpdateUserViewPermissions(permissions.BasePermission):
         if request.method == "GET":
             # The queryset is already filtered by what the user can see
             return True
-
         if request.method in ["PUT", "PATCH"]:
             return permissions_utils.can_update_user(request.user, user)
-
         return False
 
 

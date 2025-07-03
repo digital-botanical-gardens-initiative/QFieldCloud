@@ -1,24 +1,28 @@
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import QuerySet
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, extend_schema_view
+from django.db.models import QuerySet
+
+
 from qfieldcloud.core import permissions_utils
 from qfieldcloud.core.models import (
     Organization,
-    Team,
     TeamMember,
+    Team,
 )
 from qfieldcloud.core.serializers import (
     TeamMemberSerializer,
     TeamSerializer,
 )
-from rest_framework import exceptions, generics, permissions
+
+from rest_framework import generics, permissions
 from rest_framework.request import Request
-from rest_framework.views import APIView
+from rest_framework.views import View
+
+from django.shortcuts import get_object_or_404
 
 
 class TeamMemberDeleteViewPermissions(permissions.BasePermission):
-    def has_permission(self, request: Request, view: APIView) -> bool:
+    def has_permission(self, request: Request, view: View) -> bool:
         user = request.user
         organization_name = permissions_utils.get_param_from_request(
             request, "organization"
@@ -40,7 +44,7 @@ class TeamMemberPermission(permissions.BasePermission):
     Permission class to handle CRUD operations for team members.
     """
 
-    def has_permission(self, request: Request, view: APIView) -> bool:
+    def has_permission(self, request: Request, view: View) -> bool:
         organization_name = view.kwargs.get("organization_name")
         team_name = view.kwargs.get("team_name")
         team_username = Team.format_team_name(organization_name, team_name)
@@ -74,7 +78,7 @@ class TeamPermission(permissions.BasePermission):
     Permission class to handle CRUD operations for teams.
     """
 
-    def has_permission(self, request: Request, view: APIView) -> bool:
+    def has_permission(self, request: Request, view: View) -> bool:
         organization_name = view.kwargs.get("organization_name")
 
         try:
@@ -134,7 +138,7 @@ class GetUpdateDestroyTeamDetailView(generics.RetrieveUpdateDestroyAPIView):
             team_organization=serializer.instance.team_organization,
             username=full_team_name,
         ).exists():
-            raise exceptions.ValidationError(
+            raise permissions.ValidationError(
                 {"error": "A team with this name already exists."}
             )
 
@@ -174,7 +178,7 @@ class TeamListCreateView(generics.ListCreateAPIView):
     get=extend_schema(description="Retrieve, update, or delete a team member"),
     delete=extend_schema(description="Delete a team member"),
 )
-class DestroyTeamMemberView(generics.DestroyAPIView):
+class GetUpdateDestroyTeamMemberView(generics.RetrieveDestroyAPIView):
     """
     View to handle adding and listing team members. --> organizations/<str:organization_name>/team/<str:team_name>/members/"
     """
@@ -212,6 +216,19 @@ class DestroyTeamMemberView(generics.DestroyAPIView):
         team_name = self.kwargs.get("team_name")
 
         return Team.format_team_name(organization_name, team_name)
+
+    def perform_update(self, serializer: TeamMemberSerializer) -> None:
+        """
+        Update logic for the team member.
+        """
+        team_member = self.get_object()
+        new_username = self.request.data.get("member")
+
+        user_member = team_member.member
+        user_member.username = new_username
+        user_member.save()
+
+        serializer.save()
 
 
 @extend_schema_view(

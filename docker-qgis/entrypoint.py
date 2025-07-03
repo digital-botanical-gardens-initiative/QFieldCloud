@@ -31,12 +31,12 @@ logger.setLevel(logging.INFO)
 
 
 def _call_libqfieldsync_packager(
-    the_qgis_file_name: Path, package_dir: Path, offliner_type: OfflinerType
+    project_filename: Path, package_dir: Path, offliner_type: OfflinerType
 ) -> str:
     """Call `libqfieldsync` to package a project for QField"""
     logger.info("Preparing QGIS project for packaging…")
 
-    project = open_qgis_project(str(the_qgis_file_name))
+    project = open_qgis_project(str(project_filename))
 
     layers = project.mapLayers()
     project_config = ProjectConfiguration(project)
@@ -124,17 +124,17 @@ def _call_libqfieldsync_packager(
 
     logger.info("Packaging finished!")
 
-    the_packaged_qgis_filename = get_project_in_folder(str(package_dir))
-    if Path(the_packaged_qgis_filename).stat().st_size == 0:
+    packaged_project_filename = get_project_in_folder(str(package_dir))
+    if Path(packaged_project_filename).stat().st_size == 0:
         raise Exception("The packaged QGIS project file is empty.")
 
-    return the_packaged_qgis_filename
+    return packaged_project_filename
 
 
-def _extract_layer_data(the_qgis_file_name: Union[str, Path]) -> dict:
+def _extract_layer_data(project_filename: Union[str, Path]) -> dict:
     logger.info("Extracting QGIS project layer data…")
 
-    project = open_qgis_project(str(the_qgis_file_name))
+    project = open_qgis_project(str(project_filename))
     layers_by_id: dict = get_layers_data(project)
 
     logger.info(
@@ -144,7 +144,7 @@ def _extract_layer_data(the_qgis_file_name: Union[str, Path]) -> dict:
     return layers_by_id
 
 
-def _open_read_only_project(the_qgis_file_name: str) -> QgsProject:
+def _open_read_only_project(project_filename: str) -> QgsProject:
     flags = (
         # TODO we use `QgsProject` read flags, as the ones in `Qgis.ProjectReadFlags` do not work in QGIS 3.34.2
         QgsProject.ReadFlags()
@@ -154,7 +154,7 @@ def _open_read_only_project(the_qgis_file_name: str) -> QgsProject:
         | QgsProject.DontLoadProjectStyles
     )
     return open_qgis_project(
-        the_qgis_file_name,
+        project_filename,
         force_reload=True,
         disable_feature_count=True,
         flags=flags,
@@ -172,7 +172,6 @@ def cmd_package_project(args: argparse.Namespace):
                 id="start_qgis_app",
                 name="Start QGIS Application",
                 method=qfc_worker.utils.start_app,
-                return_names=["qgis_version"],
             ),
             Step(
                 id="download_project_directory",
@@ -189,7 +188,7 @@ def cmd_package_project(args: argparse.Namespace):
                 id="qgis_layers_data",
                 name="QGIS Layers Data",
                 arguments={
-                    "the_qgis_file_name": WorkDirPath("files", args.project_file),
+                    "project_filename": WorkDirPath("files", args.project_file),
                 },
                 method=_extract_layer_data,
                 return_names=["layers_by_id"],
@@ -199,19 +198,19 @@ def cmd_package_project(args: argparse.Namespace):
                 id="package_project",
                 name="Package Project",
                 arguments={
-                    "the_qgis_file_name": WorkDirPath("files", args.project_file),
+                    "project_filename": WorkDirPath("files", args.project_file),
                     "package_dir": WorkDirPath("export", mkdir=True),
                     "offliner_type": args.offliner_type,
                 },
                 method=_call_libqfieldsync_packager,
-                return_names=["the_qgis_file_name_in_qfield"],
+                return_names=["qfield_project_filename"],
             ),
             Step(
                 id="qfield_layer_data",
                 name="Packaged Layers Data",
                 arguments={
-                    "the_qgis_file_name": StepOutput(
-                        "package_project", "the_qgis_file_name_in_qfield"
+                    "project_filename": StepOutput(
+                        "package_project", "qfield_project_filename"
                     ),
                 },
                 method=_extract_layer_data,
@@ -251,7 +250,6 @@ def cmd_apply_deltas(args: argparse.Namespace):
                 id="start_qgis_app",
                 name="Start QGIS Application",
                 method=qfc_worker.utils.start_app,
-                return_names=["qgis_version"],
             ),
             Step(
                 id="download_project_directory",
@@ -268,7 +266,7 @@ def cmd_apply_deltas(args: argparse.Namespace):
                 id="apply_deltas",
                 name="Apply Deltas",
                 arguments={
-                    "the_qgis_file_name": WorkDirPath("files", args.project_file),
+                    "project_filename": WorkDirPath("files", args.project_file),
                     "delta_filename": "/io/deltafile.json",
                     "inverse": args.inverse,
                     "overwrite_conflicts": args.overwrite_conflicts,
@@ -310,7 +308,6 @@ def cmd_process_projectfile(args: argparse.Namespace):
                 id="start_qgis_app",
                 name="Start QGIS Application",
                 method=qfc_worker.utils.start_app,
-                return_names=["qgis_version"],
             ),
             Step(
                 id="download_project_directory",
@@ -327,7 +324,7 @@ def cmd_process_projectfile(args: argparse.Namespace):
                 id="project_validity_check",
                 name="Project Validity Check",
                 arguments={
-                    "the_qgis_file_name": WorkDirPath("files", args.project_file),
+                    "project_filename": WorkDirPath("files", args.project_file),
                 },
                 method=qfc_worker.process_projectfile.check_valid_project_file,
             ),
@@ -335,7 +332,7 @@ def cmd_process_projectfile(args: argparse.Namespace):
                 id="opening_check",
                 name="Opening Check",
                 arguments={
-                    "the_qgis_file_name": WorkDirPathAsStr("files", args.project_file),
+                    "project_filename": WorkDirPathAsStr("files", args.project_file),
                 },
                 method=_open_read_only_project,
                 return_names=["project"],
@@ -354,7 +351,7 @@ def cmd_process_projectfile(args: argparse.Namespace):
                 id="generate_thumbnail_image",
                 name="Generate Thumbnail Image",
                 arguments={
-                    "the_qgis_file_name": WorkDirPathAsStr("files", args.project_file),
+                    "project_filename": WorkDirPathAsStr("files", args.project_file),
                     "thumbnail_filename": Path("/io/thumbnail.png"),
                 },
                 method=qfc_worker.process_projectfile.generate_thumbnail,

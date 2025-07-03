@@ -9,7 +9,6 @@ from django.utils.translation import gettext as _
 from invitations.adapters import get_invitations_adapter
 from invitations.signals import invite_url_sent
 from invitations.utils import get_invitation_model
-
 from qfieldcloud.core import permissions_utils
 from qfieldcloud.core.models import Person
 
@@ -100,7 +99,7 @@ def send_invitation(invite, **kwargs):
     """Sends invitation.
 
     Args:
-        invite: the invitation to be sent
+        invite (Invitation): the invitation to be sent
 
     The same as the original Invitation.send_invitation, but without passing the request object.
     https://github.com/bee-keeper/django-invitations/blob/invitations/models.py#L42

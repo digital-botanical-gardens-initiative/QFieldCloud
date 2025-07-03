@@ -1,8 +1,6 @@
-from typing import Iterable
-
 from django.db.models import QuerySet
-from rest_framework import filters, views
-from rest_framework.request import Request
+from django.http import HttpRequest
+from rest_framework import filters, viewsets
 
 
 class QfcOrderingFilter(filters.OrderingFilter):
@@ -17,17 +15,17 @@ class QfcOrderingFilter(filters.OrderingFilter):
     TOKENS_LIST_SEPARATOR = ","
     TOKENS_VALUE_SEPARATOR = "="
 
-    def _get_query_field(self, fields: Iterable[str], term: str) -> str | None:
+    def _get_query_field(self, fields: list[str], term: str) -> str | None:
         """Searches a term in a query field list.
 
         The field list elements may start with "-".
         This method should be used to search a term from a query's ordering fields.
 
         Args:
-            fields: list of fields to search
-            term: term to search in the list
+            fields (list[str]): list of fields to search
+            term (str): term to search in the list
         Returns:
-            the matching field, if present in the list
+            str | None: the matching field, if present in the list
         """
         for field in fields:
             compare_value = field
@@ -40,16 +38,15 @@ class QfcOrderingFilter(filters.OrderingFilter):
                 continue
 
             return field
-
         return None
 
     def _parse_tokenized_attributes(self, raw: str) -> dict[str, str]:
         """Parses an ordering field attributes expression.
 
         Args:
-            raw: raw expression to parse, e.g.: "alias=my_field_alias,key=value"
+            raw (str): raw expression to parse, e.g.: "alias=my_field_alias,key=value"
         Returns:
-            dict containing the expression's attributes
+            dict[str, str]: dict containing the expression's attributes
         """
         definition_attrs = raw.split(self.TOKENS_LIST_SEPARATOR)
 
@@ -64,11 +61,10 @@ class QfcOrderingFilter(filters.OrderingFilter):
         """Parses a custom ordering field with attributes expression.
 
         Args:
-            definition: raw definition of the ordering field to parse,
+            definition (str): raw definition of the ordering field to parse,
                 e.g.: "my_field::alias=my_field_alias,key=value"
-
-        Returns:
-            tuple containing the field name (1st) and its attributes dict (2nd)
+        Returns :
+            tuple[str, dict[str, str]]: tuple containing the field name (1st) and its attributes dict (2nd)
         """
         name, attr_str = definition.split(self.SEPARATOR, 1)
         attrs = self._parse_tokenized_attributes(attr_str)
@@ -78,9 +74,9 @@ class QfcOrderingFilter(filters.OrderingFilter):
     def remove_invalid_fields(
         self,
         queryset: QuerySet,
-        fields: Iterable[str],
-        view: views.APIView,
-        request: Request,
+        fields: list[str],
+        view: viewsets.ModelViewSet,
+        request: HttpRequest,
     ) -> list[str]:
         """Process ordering fields by parsing custom field expression.
 
@@ -89,12 +85,12 @@ class QfcOrderingFilter(filters.OrderingFilter):
         but `my_field` is the real model field.
 
         Args:
-            queryset: Django's ORM queryset of the same model as the one used in view of the `ModelViewSet`
-            fields: ordering fields passed to the HTTP querystring
-            view: DRF view instance
-            request: DRF request instance
+            queryset (QuerySet): Django's ORM queryset of the same model as the one used in view of the `ModelViewSet`
+            fields (list[str]): ordering fields passed to the HTTP querystring
+            view (ModelViewSet): DRF view instance
+            request (HttpRequest): DRF request instance
         Returns :
-            parsed ordering fields where aliases have been replaced
+            list[str]: parsed ordering fields where aliases have been replaced
         """
         base_fields = super().remove_invalid_fields(queryset, fields, view, request)
         valid_fields = []

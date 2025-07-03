@@ -1,10 +1,9 @@
 import logging
 
+import qfieldcloud.core.models as models
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
-
-import qfieldcloud.core.models as models
 from qfieldcloud.core import exceptions
 
 logger = logging.getLogger(__name__)
@@ -102,7 +101,7 @@ def repackage(project: "models.Project", user: "models.User") -> "models.Package
     Checks if there is already an unfinished package job and returns it,
     or creates a new package job and returns it.
     """
-    if not project.has_the_qgis_file:
+    if not project.project_filename:
         raise exceptions.NoQGISProjectError()
 
     # Check if active package job already exists
@@ -123,7 +122,7 @@ def repackage(project: "models.Project", user: "models.User") -> "models.Package
 def repackage_if_needed(
     project: "models.Project", user: "models.User"
 ) -> "models.PackageJob":
-    if not project.has_the_qgis_file:
+    if not project.project_filename:
         raise exceptions.NoQGISProjectError()
 
     if project.needs_repackaging:

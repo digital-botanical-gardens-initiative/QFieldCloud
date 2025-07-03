@@ -8,7 +8,6 @@ from drf_spectacular.utils import (
 )
 from qfieldcloud.core import pagination, permissions_utils
 from qfieldcloud.core.drf_utils import QfcOrderingFilter
-from qfieldcloud.core.exceptions import ObjectNotFoundError
 from qfieldcloud.core.models import Project, ProjectQueryset
 from qfieldcloud.core.serializers import ProjectSerializer
 from qfieldcloud.core.utils2 import storage
@@ -19,19 +18,12 @@ User = get_user_model()
 
 
 class ProjectViewSetPermissions(permissions.BasePermission):
-    def has_permission(self, request, view) -> bool:
-        if view.action is None:
-            # If `view.action` is `None`, means that we are getting a OPTIONS request.
-            # We don't know what it is, so we deny permission.
-            return False
-
+    def has_permission(self, request, view):
         if view.action == "list":
             # The queryset is already filtered by what the user can see
             return True
-
         user = request.user
         owner = permissions_utils.get_param_from_request(request, "owner")
-
         if owner:
             owner_obj = User.objects.get(username=owner)
         else:
@@ -43,11 +35,7 @@ class ProjectViewSetPermissions(permissions.BasePermission):
             return permissions_utils.can_create_project(user, owner_obj)
 
         projectid = permissions_utils.get_param_from_request(request, "projectid")
-
-        try:
-            project = Project.objects.get(id=projectid)
-        except Project.DoesNotExist:
-            raise ObjectNotFoundError(detail="Project not found.")
+        project = Project.objects.get(id=projectid)
 
         if view.action == "retrieve":
             return permissions_utils.can_retrieve_project(user, project)
@@ -109,8 +97,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     user_role_origin=ProjectQueryset.RoleOrigins.PUBLIC
                 )
 
-        projects = projects.order_by("-is_featured", "owner__username", "name")
-
         return projects
 
     @transaction.atomic
@@ -140,10 +126,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, projectid):
         # Delete files from storage
-        project = Project.objects.get(id=projectid)
-
-        if project.uses_legacy_storage:
-            storage.delete_all_project_files_permanently(projectid)
+        storage.delete_all_project_files_permanently(projectid)
 
         return super().destroy(request, projectid)
 
@@ -157,8 +140,4 @@ class PublicProjectsListView(generics.ListAPIView):
     ordering_fields = ["owner__username::alias=owner", "name", "created_at"]
 
     def get_queryset(self):
-        return (
-            Project.objects.for_user(self.request.user)
-            .filter(is_public=True)
-            .order_by("-is_featured", "owner__username", "name")
-        )
+        return Project.objects.for_user(self.request.user).filter(is_public=True)

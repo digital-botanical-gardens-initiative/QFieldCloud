@@ -3,11 +3,10 @@ import time
 
 from django.conf import settings
 from django.core.cache import cache
-from rest_framework import status
-from rest_framework.test import APITransactionTestCase
-
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.models import Person, Project
+from rest_framework import status
+from rest_framework.test import APITransactionTestCase
 
 from .utils import setup_subscription_plans
 
@@ -143,13 +142,11 @@ class QfcTestCase(APITransactionTestCase):
 
         items = {el["id"] for el in data}
         next_url = response.headers.get("X-Next-Page")
-
         while next_url:
             response = self.client.get(next_url)
             results = response.json()
             items.update({el["id"] for el in results})
             next_url = response.headers.get("X-Next-Page")
-
         self.assertEqual(len(items), self.total_projects)
 
         # Traverse in both directions: Previous
@@ -159,11 +156,9 @@ class QfcTestCase(APITransactionTestCase):
 
         items.clear()
         previous_url = response.headers.get("X-Previous-Page")
-
         while previous_url:
             response = self.client.get(previous_url)
             results = response.json()
             items.update({el["id"] for el in results})
             previous_url = response.headers.get("X-Previous-Page")
-
         self.assertEqual(len(items), self.total_projects)

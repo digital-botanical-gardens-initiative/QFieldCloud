@@ -2,9 +2,6 @@ import logging
 
 from django.db import IntegrityError
 from django.utils import timezone
-from rest_framework import status
-from rest_framework.test import APITestCase
-
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.models import (
     Organization,
@@ -14,6 +11,8 @@ from qfieldcloud.core.models import (
     User,
     UserAccount,
 )
+from rest_framework import status
+from rest_framework.test import APITestCase
 
 from .utils import set_subscription, setup_subscription_plans
 

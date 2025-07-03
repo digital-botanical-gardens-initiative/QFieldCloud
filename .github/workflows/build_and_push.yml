@@ -45,12 +45,6 @@ jobs:
             docker_context: docker-nginx
             enable_dockerhub: true
 
-          -
-            service_name: createbuckets
-            dockerfile: docker-createbuckets/Dockerfile
-            docker_context: docker-createbuckets
-            enable_dockerhub: true
-
     steps:
       -
         name: Checkout
@@ -73,8 +67,8 @@ jobs:
           tags: |
             type=ref,enable=true,priority=600,prefix=pr-,suffix=,event=pr
             type=sha,format=short,prefix=commit-,event=pr
-            type=match,pattern=v(.*),group=1
-            type=edge,branch=master
+            type=semver,pattern={{version}},event=release
+            type=edge,branch=main
 
       -
         name: Login to GitHub Container Repository (ghcr.io)

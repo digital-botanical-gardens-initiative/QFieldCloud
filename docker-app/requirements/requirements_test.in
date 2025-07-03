@@ -1,5 +1,4 @@
 fiona==1.*
 imageio==2.*
-requests-mock==1.*
 selenium==4.6.*
 shapely==2.*

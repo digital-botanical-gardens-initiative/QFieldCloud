@@ -16,6 +16,3 @@ Pipfile*
 **/site-packages
 docker-qgis/libqfieldsync
 docker-qgis/qfieldcloud-sdk-python
-
-# compiled translations
-docker-app/qfieldcloud/locale/**/*.mo

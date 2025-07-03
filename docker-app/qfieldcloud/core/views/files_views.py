@@ -1,8 +1,3 @@
-"""
-Todo:
-    * Delete with QF-4963 Drop support for legacy storage
-"""
-
 import copy
 import io
 import logging
@@ -10,9 +5,9 @@ from pathlib import PurePath
 from traceback import print_stack
 
 import qfieldcloud.core.utils2 as utils2
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
+from django.conf import settings
 from django.utils import timezone
 from drf_spectacular.utils import (
     OpenApiParameter,
@@ -22,13 +17,13 @@ from drf_spectacular.utils import (
 )
 from qfieldcloud.core import exceptions, permissions_utils, utils
 from qfieldcloud.core.models import Job, ProcessProjectfileJob, Project
-from qfieldcloud.core.serializers import FileWithVersionsSerializer
+from qfieldcloud.core.serializers import FileSerializer
 from qfieldcloud.core.utils import S3ObjectVersion, get_project_file_with_versions
 from qfieldcloud.core.utils2.audit import LogEntry, audit
 from qfieldcloud.core.utils2.sentry import report_serialization_diff_to_sentry
 from qfieldcloud.core.utils2.storage import (
     get_attachment_dir_prefix,
-    purge_old_file_versions_legacy,
+    purge_old_file_versions,
 )
 from rest_framework import permissions, serializers, status, views
 from rest_framework.exceptions import NotFound
@@ -53,7 +48,7 @@ class ListFilesViewPermissions(permissions.BasePermission):
 @extend_schema_view(
     get=extend_schema(
         description="Get all the project's file versions",
-        responses={200: serializers.ListSerializer(child=FileWithVersionsSerializer())},
+        responses={200: serializers.ListSerializer(child=FileSerializer())},
         parameters=[
             OpenApiParameter(
                 name="skip_metadata",
@@ -153,11 +148,10 @@ class DownloadPushDeleteFileViewPermissions(permissions.BasePermission):
 
         if request.method == "GET":
             return permissions_utils.can_read_files(user, project)
-        elif request.method == "DELETE":
+        if request.method == "DELETE":
             return permissions_utils.can_delete_files(user, project)
-        elif request.method == "POST":
+        if request.method == "POST":
             return permissions_utils.can_create_files(user, project)
-
         return False
 
 
@@ -268,11 +262,10 @@ class DownloadPushDeleteFileView(views.APIView):
             project = request.project
         else:
             project = Project.objects.get(id=projectid)
-
-        is_the_qgis_file = utils.is_the_qgis_file(filename)
+        is_qgis_project_file = utils.is_qgis_project_file(filename)
 
         # check if the project restricts qgs/qgz file modification to admins
-        if is_the_qgis_file and not permissions_utils.can_modify_qgis_projectfile(
+        if is_qgis_project_file and not permissions_utils.can_modify_qgis_projectfile(
             request.user, project
         ):
             raise exceptions.RestrictedProjectModificationError(
@@ -281,9 +274,9 @@ class DownloadPushDeleteFileView(views.APIView):
 
         # check only one qgs/qgz file per project
         if (
-            is_the_qgis_file
-            and project.has_the_qgis_file
-            and PurePath(filename) != PurePath(project.the_qgis_file_name)
+            is_qgis_project_file
+            and project.project_filename is not None
+            and PurePath(filename) != PurePath(project.project_filename)
         ):
             raise exceptions.MultipleProjectsError(
                 "Only one QGIS project per project allowed"
@@ -317,11 +310,11 @@ class DownloadPushDeleteFileView(views.APIView):
             update_fields = ["data_last_updated_at", "file_storage_bytes"]
 
             if get_attachment_dir_prefix(project, filename) == "" and (
-                is_the_qgis_file or project.has_the_qgis_file
+                is_qgis_project_file or project.project_filename is not None
             ):
-                if is_the_qgis_file:
-                    project.the_qgis_file_name = filename
-                    update_fields.append("the_qgis_file_name")
+                if is_qgis_project_file:
+                    project.project_filename = filename
+                    update_fields.append("project_filename")
 
                 running_jobs = ProcessProjectfileJob.objects.filter(
                     project=project,
@@ -357,14 +350,14 @@ class DownloadPushDeleteFileView(views.APIView):
             )
 
         # Delete the old file versions
-        purge_old_file_versions_legacy(project)
+        purge_old_file_versions(project)
 
         return Response(status=status.HTTP_201_CREATED)
 
     @transaction.atomic()
     def delete(self, request, projectid, filename):
         project = Project.objects.select_for_update().get(id=projectid)
-        version_id = request.GET.get("version", request.headers.get("x-file-version"))
+        version_id = request.headers.get("x-file-version")
 
         if version_id:
             utils2.storage.delete_project_file_version_permanently(

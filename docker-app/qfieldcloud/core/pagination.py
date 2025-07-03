@@ -13,7 +13,6 @@ def parameterize_pagination(_class: type) -> Callable:
     def configure_class_object(*args, **kwargs) -> type:
         for k, v in kwargs.items():
             setattr(_class, k, v)
-
         return _class
 
     return configure_class_object
@@ -33,15 +32,14 @@ class QfcLimitOffsetPagination(pagination.LimitOffsetPagination):
         Set new header fields to carry pagination controls.
         """
         headers = {
-            "X-Total-Count": str(self.count),
+            "X-Total-Count": self.count,
         }
 
-        next_link: str | None = self.get_next_link()
-
+        next_link = self.get_next_link()
         if next_link:
             headers["X-Next-Page"] = next_link
 
-        previous_link: str | None = self.get_previous_link()
+        previous_link = self.get_previous_link()
         if previous_link:
             headers["X-Previous-Page"] = previous_link
 
@@ -51,11 +49,7 @@ class QfcLimitOffsetPagination(pagination.LimitOffsetPagination):
         """
         Paginate results injecting pagination controls and counter into response headers.
         """
-        if (
-            self.request is not None
-            and self.request.GET.get("offset")
-            and not self.request.GET.get("limit")
-        ):
+        if self.request.GET.get("offset") and not self.request.GET.get("limit"):
             # slice serialized data to enforce the application wide limit
             data = islice(data, settings.QFIELDCLOUD_API_DEFAULT_PAGE_LIMIT)
 

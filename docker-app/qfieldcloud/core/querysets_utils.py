@@ -4,8 +4,8 @@ from operator import and_, or_
 from django.db.models import F, Q, QuerySet
 from django.db.models import Value as V
 from django.db.models.functions import StrIndex
-
 from qfieldcloud.core.models import (
+    Delta,
     Organization,
     OrganizationMember,
     Person,
@@ -35,6 +35,11 @@ def get_organization_members(organization) -> QuerySet[Person]:
     return org_members.union(owner)
 
 
+def get_project_deltas(project):
+    """Return a queryset of all available deltas of a specific project."""
+    return Delta.objects.filter(project=project)
+
+
 def get_users(
     username: str,
     project: Project = None,
@@ -43,9 +48,9 @@ def get_users(
     exclude_teams: bool = False,
     invert: bool = False,
 ) -> QuerySet:
-    assert project is None or organization is None, (
-        "Cannot have the project and organization filters set simultaneously"
-    )
+    assert (
+        project is None or organization is None
+    ), "Cannot have the project and organization filters set simultaneously"
 
     if username:
         users = User.objects.filter(username__icontains=username)

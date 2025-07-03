@@ -11,12 +11,12 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
-from django.db.models import Case, Q, When
+from django.db.models import Case, Q
 from django.db.models import Value as V
+from django.db.models import When
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from model_utils.managers import InheritanceManagerMixin
-
 from qfieldcloud.core.models import Organization, Person, User, UserAccount
 
 from .exceptions import NotPremiumPlanException
@@ -81,9 +81,7 @@ class Plan(models.Model):
                     user_type=User.Type.ORGANIZATION,
                     initial_subscription_status=SubscriptionStatus.ACTIVE_PAID,
                 )
-
         result = cls.objects.order_by("-is_default").first()
-
         return cast(Plan, result)
 
     # unique identifier of the subscription plan
@@ -216,7 +214,6 @@ class Plan(models.Model):
                 Plan.objects.filter(user_type=self.user_type).exclude(
                     pk=self.pk
                 ).update(is_default=False)
-
             return super().save(*args, **kwargs)
 
     def __str__(self):
@@ -377,7 +374,7 @@ class SubscriptionQuerySet(models.QuerySet):
         """Returns all subscriptions that are managed by given `user_id`. It means the owner personal account and all organizations they own.
 
         Args:
-            user_id: the user we are searching against
+            user_id (int): the user we are searching against
         """
         if not user_id:
             # NOTE: for logged out AnonymousUser the user_id is None
@@ -626,17 +623,15 @@ class AbstractSubscription(models.Model):
             return package.quantity
         else:
             package = self.get_active_package(package_type)
-
             if package and not package.active_until:
                 return package.quantity
-
         return 0
 
     def set_package_quantity(
         self,
         package_type: PackageType,
         quantity: int,
-        active_since: datetime | None = None,
+        active_since: datetime = None,
     ):
         if not self.plan.is_premium:
             raise NotPremiumPlanException(
@@ -687,10 +682,10 @@ class AbstractSubscription(models.Model):
         """Returns the current subscription, if not exists returns a newly created subscription with the default plan.
 
         Args:
-            account: the account the subscription belongs to.
+            account (UserAccount): the account the subscription belongs to.
 
         Returns:
-            the current subscription
+            Self: the current subscription
 
         TODO Python 3.11 the actual return type is Self
         """
@@ -699,7 +694,7 @@ class AbstractSubscription(models.Model):
         except cls.DoesNotExist:
             subscription = cls.create_default_plan_subscription(account)
 
-        return cast(Subscription, subscription)
+        return subscription
 
     @classmethod
     def get_upcoming_subscription(cls, account: UserAccount) -> "Subscription":
@@ -720,10 +715,10 @@ class AbstractSubscription(models.Model):
         """Updates the subscription properties.
 
         Args:
-            subscription: subscription to be updated
+            subscription (Subscription): subscription to be updated
 
         Returns:
-            the same as the subscription argument
+            Self: the same as the subscription argument
 
         TODO Python 3.11 the actual return type is Self
         """
@@ -759,16 +754,16 @@ class AbstractSubscription(models.Model):
 
     @classmethod
     def create_default_plan_subscription(
-        cls, account: UserAccount, active_since: datetime | None = None
+        cls, account: UserAccount, active_since: datetime = None
     ) -> "AbstractSubscription":
         """Creates the default subscription for a given account.
 
         Args:
-            account: the account the subscription belongs to.
-            active_since: active since for the subscription
+            account (UserAccount): the account the subscription belongs to.
+            active_since (datetime): active since for the subscription
 
         Returns:
-            the created subscription.
+            Self: the created subscription.
 
         TODO Python 3.11 the actual return type is Self
         """
@@ -810,13 +805,13 @@ class AbstractSubscription(models.Model):
         """Creates a subscription for a given account to a given plan. If the plan is a trial, create the default subscription in the end of the period.
 
         Args:
-            account: the account the subscription belongs to.
-            plan: the plan to subscribe to. Note if the the plan is a trial, the first return value would be the trial subscription, otherwise it would be None.
-            created_by: created by.
-            active_since: active since for the subscription.
+            account (UserAccount): the account the subscription belongs to.
+            plan (Plan): the plan to subscribe to. Note if the the plan is a trial, the first return value would be the trial subscription, otherwise it would be None.
+            created_by (Person): created by.
+            active_since (datetime | None): active since for the subscription.
 
         Returns:
-            the created trial subscription if the given plan was a trial and the regular subscription.
+            tuple[AbstractSubscription | None, AbstractSubscription]: the created trial subscription if the given plan was a trial and the regular subscription.
 
         TODO Python 3.11 the actual return type is Self
         """
@@ -826,9 +821,9 @@ class AbstractSubscription(models.Model):
 
         regular_active_since: datetime | None = None
         if plan.is_trial:
-            assert isinstance(active_since, datetime), (
-                "Creating a trial plan requires `active_since` to be a valid datetime object"
-            )
+            assert isinstance(
+                active_since, datetime
+            ), "Creating a trial plan requires `active_since` to be a valid datetime object"
 
             active_until = active_since + timedelta(days=config.TRIAL_PERIOD_DAYS)
             logger.info(
@@ -888,39 +883,6 @@ class AbstractSubscription(models.Model):
         regular_subscription_obj = cls.objects.get(pk=regular_subscription.pk)
 
         return trial_subscription_obj, regular_subscription_obj
-
-    def clean(self):
-        """
-        Validates that the subscription's active period does not overlap with
-        any other active subscriptions for the same account.
-        """
-        # If there is no `active_since`, nothing to check.
-        if not self.active_since:
-            return
-
-        conflicting_subscriptions_qs = (
-            self.__class__.objects.filter(
-                account=self.account,
-            )
-            .exclude(pk=self.pk)
-            .filter(
-                Q(active_since__lt=self.active_since)
-                & (Q(active_until__isnull=True) | Q(active_until__gt=self.active_since))
-            )
-        )
-
-        if conflicting_subscriptions_qs.exists():
-            raise ValidationError(
-                {
-                    "active_since": _(
-                        "This account already has an active subscription that overlaps with this period. Please cancel the existing subscription or choose a different time range."
-                    )
-                }
-            )
-
-    def save(self, *args, **kwargs):
-        self.clean()
-        super().save(*args, **kwargs)
 
     def __str__(self):
         active_storage_total_mb = (

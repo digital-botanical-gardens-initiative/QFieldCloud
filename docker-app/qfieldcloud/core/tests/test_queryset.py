@@ -1,7 +1,5 @@
 import logging
 
-from rest_framework.test import APITransactionTestCase
-
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core import querysets_utils
 from qfieldcloud.core.models import (
@@ -15,6 +13,7 @@ from qfieldcloud.core.models import (
     TeamMember,
     User,
 )
+from rest_framework.test import APITransactionTestCase
 
 from .utils import set_subscription, setup_subscription_plans
 
@@ -161,9 +160,9 @@ class QfcTestCase(APITransactionTestCase):
         is_valid: bool = True,
     ):
         """Asserts that user has give role/origin on project"""
-        assert (role is None) == (origin is None), (
-            "Both role and origin should be either defined or undefined!"
-        )
+        assert (role is None) == (
+            origin is None
+        ), "Both role and origin should be either defined or undefined!"
 
         # Assert user does not have any role
         if role is None:

@@ -9,9 +9,6 @@ from django.conf import settings
 from django.http import FileResponse
 from django.test import tag
 from django.utils import timezone
-from rest_framework import status
-from rest_framework.test import APITransactionTestCase
-
 from qfieldcloud.authentication.models import AuthToken
 from qfieldcloud.core.geodb_utils import delete_db_and_role
 from qfieldcloud.core.models import (
@@ -28,7 +25,8 @@ from qfieldcloud.core.models import (
     TeamMember,
 )
 from qfieldcloud.core.utils2.storage import get_stored_package_ids
-from qfieldcloud.filestorage.models import File
+from rest_framework import status
+from rest_framework.test import APITransactionTestCase
 
 from .utils import setup_subscription_plans, testdata_path, wait_for_project_ok_status
 
@@ -162,7 +160,7 @@ class QfcTestCase(APITransactionTestCase):
                 if tempdir:
                     for filename in expected_files:
                         response = self.client.get(
-                            f"/api/v1/packages/{self.project1.id}/latest/files/{filename}/"
+                            f"/api/v1/packages/{self.project1.id}/latest/files/project_qfield.qgs/"
                         )
                         local_file = os.path.join(tempdir, filename)
 
@@ -650,11 +648,6 @@ class QfcTestCase(APITransactionTestCase):
         )
         self.conn.commit()
 
-        if not self.project1.uses_legacy_storage:
-            self.assertEqual(
-                File.objects.filter(file_type=File.FileType.PACKAGE_FILE).count(), 0
-            )
-
         self.upload_files_and_check_package(
             token=self.token1.key,
             project=self.project1,
@@ -672,19 +665,9 @@ class QfcTestCase(APITransactionTestCase):
         old_package = PackageJob.objects.filter(project=self.project1).latest(
             "created_at"
         )
-
-        # TODO Delete with QF-4963 Drop support for legacy storage
-        if self.project1.uses_legacy_storage:
-            stored_package_ids = get_stored_package_ids(self.project1)
-            self.assertIn(str(old_package.id), stored_package_ids)
-            self.assertEqual(len(stored_package_ids), 1)
-        else:
-            self.assertGreaterEqual(
-                File.objects.filter(package_job=old_package).count(), 1
-            )
-            self.assertGreaterEqual(
-                File.objects.filter(file_type=File.FileType.PACKAGE_FILE).count(), 1
-            )
+        stored_package_ids = get_stored_package_ids(self.project1.id)
+        self.assertIn(str(old_package.id), stored_package_ids)
+        self.assertEqual(len(stored_package_ids), 1)
 
         self.check_package(
             self.token1.key,
@@ -700,39 +683,9 @@ class QfcTestCase(APITransactionTestCase):
             "created_at"
         )
 
-        # TODO Delete with QF-4963 Drop support for legacy storage
-        if self.project1.uses_legacy_storage:
-            stored_package_ids = get_stored_package_ids(self.project1)
+        stored_package_ids = get_stored_package_ids(self.project1.id)
 
-            self.assertNotEqual(old_package.id, new_package.id)
-            self.assertNotIn(str(old_package.id), stored_package_ids)
-            self.assertIn(str(new_package.id), stored_package_ids)
-            self.assertEqual(len(stored_package_ids), 1)
-        else:
-            self.assertEqual(File.objects.filter(package_job=old_package).count(), 0)
-            self.assertGreaterEqual(
-                File.objects.filter(package_job=new_package).count(), 1
-            )
-            self.assertGreaterEqual(
-                File.objects.filter(file_type=File.FileType.PACKAGE_FILE).count(), 1
-            )
-
-    def test_package_and_project_file_attachments(self):
-        # upload attachments to the project
-        self.upload_files_and_check_package(
-            token=self.token1.key,
-            project=self.project1,
-            files=[
-                ("DCIM/1.jpg", "DCIM/1.jpg"),
-                ("DCIM/2.jpg", "DCIM/2.jpg"),
-                ("bumblebees.gpkg", "bumblebees.gpkg"),
-                ("simple_bumblebees.qgs", "simple_bumblebees.qgs"),
-            ],
-            expected_files=[
-                "data.gpkg",
-                "simple_bumblebees_qfield.qgs",
-                "simple_bumblebees_qfield_attachments.zip",
-                "DCIM/1.jpg",
-                "DCIM/2.jpg",
-            ],
-        )
+        self.assertNotEqual(old_package.id, new_package.id)
+        self.assertNotIn(str(old_package.id), stored_package_ids)
+        self.assertIn(str(new_package.id), stored_package_ids)
+        self.assertEqual(len(stored_package_ids), 1)

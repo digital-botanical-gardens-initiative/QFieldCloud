@@ -8,7 +8,6 @@ from django_cron.management.commands import runcrons
 from django_currentuser.middleware import _set_current_user
 from notifications.models import Notification
 from notifications.signals import notify
-
 from qfieldcloud.core.models import (
     Organization,
     OrganizationMember,
@@ -43,7 +42,6 @@ class QfcTestCase(TestCase):
     def assertNotifs(self, expected_count, filter=None):
         if filter is None:
             filter = {}
-
         notifications = Notification.objects.filter(**filter)
         actual_count = notifications.count()
         if actual_count != expected_count:

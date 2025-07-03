@@ -1,25 +1,35 @@
 import csv
 import logging
 from sys import stdout
-from typing import Generator, Iterable
+from typing import Generator, NamedTuple
 
+import boto3
 import mypy_boto3_s3
-from django.conf import settings
-from django.core.files.storage import storages
 from django.core.management.base import BaseCommand, CommandParser
-from storages.backends.s3boto3 import S3Boto3Storage
 
 logger = logging.getLogger(__name__)
 
 
+class S3ConfigObject(NamedTuple):
+    storage_access_key_id: str
+    storage_secret_access_key: str
+    storage_bucket_name: str
+    storage_endpoint_url: str
+    storage_region_name: str
+
+
 class Command(BaseCommand):
     """
-    Prepare a CSV with the storage files metadata
+    Save metadata from S3 storage project files to disk.
     Example usage:
     ```
     docker compose exec app python manage.py extracts3data \
         --output results.csv \
-        --storage-name
+        --storage_access_key_id ... \
+        --storage_secret_access_key ... \
+        --storage_bucket_name ... \
+        --storage_endpoint_url ... \
+        --storage_region_name ...
     ```
     """
 
@@ -28,33 +38,51 @@ class Command(BaseCommand):
             "-o", "--output", type=str, help="Optional: Name of output file"
         )
         parser.add_argument(
-            "--storage-name",
+            "--storage_access_key_id",
             type=str,
-            choices=self._get_supported_storage_names(),
-            help="Storage name as defined in `STORAGES` envvar",
+            help="S3 access key ID",
         )
         parser.add_argument(
-            "--prefix",
+            "--storage_secret_access_key",
             type=str,
-            default="",
-            help="File prefix to search for",
+            help="S3 access key secret",
+        )
+        parser.add_argument(
+            "--storage_bucket_name",
+            type=str,
+            help="S3 bucket name",
+        )
+        parser.add_argument(
+            "--storage_endpoint_url",
+            type=str,
+            help="S3 endpoint url",
+        )
+        parser.add_argument(
+            "--storage_region_name",
+            type=str,
+            help="S3 region name",
         )
 
     def handle(self, **options):
-        bucket = self.get_s3_bucket(options["storage_name"])
-        output_filename = options.get("output")
-        fields = [
+        build_config = {}
+        for key, value in options.items():
+            if key in S3ConfigObject._fields:
+                build_config[key] = value
+
+        config = S3ConfigObject(**build_config)
+        bucket = self.get_s3_bucket(config)
+        output_name = options.get("output")
+        fields = (
+            "id",
             "key",
-            "version_id",
             "e_tag",
             "size",
-            "is_latest",
             "last_modified",
-        ]
-        rows = self.read_bucket_files(bucket, fields, options.get("prefix", ""))
+        )
+        rows = self.read_bucket_files(bucket, fields)
 
-        if output_filename:
-            handle = open(output_filename, "w")
+        if output_name:
+            handle = open(output_name, "w")
         else:
             handle = stdout
 
@@ -62,58 +90,40 @@ class Command(BaseCommand):
         writer.writerow(fields)
         writer.writerows(rows)
 
-        if output_filename:
+        if output_name:
             handle.close()
 
-        logger.info(f"Successfully exported data to {output_filename or 'STDOUT'}")
+        logger.info(f"Successfully exported data to {output_name}")
 
     @staticmethod
-    def get_s3_bucket(storage_name: str) -> mypy_boto3_s3.service_resource.Bucket:
-        storage = storages[storage_name]
-
-        if not isinstance(storage, S3Boto3Storage):
-            raise NotImplementedError(
-                "Using the `extracts3data` command only supports S3 storages!"
-            )
-
-        # Access the bucket name
-        bucket_name = storage.bucket_name
-
-        # Access the raw boto3 bucket
-        return storage.connection.Bucket(bucket_name)
+    def get_s3_bucket(config: S3ConfigObject) -> mypy_boto3_s3.service_resource.Bucket:
+        """Get a new S3 Bucket instance using S3ConfigObject"""
+        bucket_name = config.storage_bucket_name
+        session = boto3.Session(
+            aws_access_key_id=config.storage_access_key_id,
+            aws_secret_access_key=config.storage_secret_access_key,
+            region_name=config.storage_region_name,
+        )
+        s3 = session.resource("s3", endpoint_url=config.storage_endpoint_url)
+        return s3.Bucket(bucket_name)
 
     @staticmethod
     def read_bucket_files(
-        bucket: mypy_boto3_s3.service_resource.Bucket,
-        fields: Iterable[str],
-        prefix: str = "",
+        bucket, fields: tuple[str], prefix: str = ""
     ) -> Generator[list[str], None, None]:
         """Yield file metadata 1 by 1. Passing `prefix=""` will list all bucket objects."""
 
-        for version in bucket.object_versions.filter(Prefix=prefix):
+        for file in bucket.object_versions.filter(Prefix=prefix):
             row = []
 
             for field in fields:
-                item = getattr(version, field)
+                item = getattr(file, field)
 
                 if not isinstance(item, str):
                     item = str(item)
 
+                # some fields (e.g. `e_tag`) have unnecessary `"` (double quotes) in their value.
+                item = item.strip('"')
                 row.append(item)
 
             yield row
-
-    def _get_supported_storage_names(self) -> list[str]:
-        """Get storage names that are supported by the command"""
-        storage_names = []
-
-        for storage_name, storage_config in settings.STORAGES.items():
-            storage = storages[storage_name]
-
-            # currently we only support S3 storage
-            if not isinstance(storage, S3Boto3Storage):
-                continue
-
-            storage_names.append(storage_name)
-
-        return storage_names

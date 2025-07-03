@@ -1,4 +1,5 @@
 import uuid
+from typing import Set
 
 from django.core.management.base import BaseCommand
 from qfieldcloud.core import utils
@@ -13,7 +14,7 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--limit", type=int, default=100)
 
-    def get_orphaned_project_ids(self, project_ids: set[str]) -> set[str]:
+    def get_orphaned_project_ids(self, project_ids: Set[str]) -> Set[str]:
         orphaned_project_ids = set()
         existing_project_ids = Project.objects.filter(
             id__in=list(project_ids),

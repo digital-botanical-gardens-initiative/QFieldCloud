@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Callable, NamedTuple
+from typing import IO, Any, Callable, NamedTuple, Optional
 
 from libqfieldsync.layer import LayerSource
 from libqfieldsync.utils.bad_layer_handler import (
@@ -52,7 +52,7 @@ class QfcWorkerException(Exception):
 
     message = ""
 
-    def __init__(self, message: str | None = None, **kwargs):
+    def __init__(self, message: str = None, **kwargs):
         self.message = (message or self.message) % kwargs
         self.details = kwargs
 
@@ -60,15 +60,25 @@ class QfcWorkerException(Exception):
 
 
 class ProjectFileNotFoundException(QfcWorkerException):
-    message = 'Project file "%(the_qgis_file_name)s" does not exist'
+    message = 'Project file "%(project_filename)s" does not exist'
 
 
 class InvalidFileExtensionException(QfcWorkerException):
-    message = 'Project file "%(the_qgis_file_name)s" has unknown file extension "%(extension)s"'
+    message = (
+        'Project file "%(project_filename)s" has unknown file extension "%(extension)s"'
+    )
 
 
 class InvalidXmlFileException(QfcWorkerException):
     message = "Project file is an invalid XML document:\n%(xml_error)s"
+
+
+class InvalidQgisFileException(QfcWorkerException):
+    message = 'Project file "%(project_filename)s" is invalid QGIS file:\n%(error)s'
+
+
+class InvalidLayersException(QfcWorkerException):
+    message = 'Project file "%(project_filename)s" contains invalid layers'
 
 
 class FailedThumbnailGenerationException(QfcWorkerException):
@@ -136,7 +146,7 @@ def _write_log_message(message, tag, level):
 QGISAPP: QgsApplication = None
 
 
-def start_app() -> str:
+def start_app():
     """
     Will start a QgsApplication and call all initialization code like
     registering the providers and other infrastructure. It will not load
@@ -148,13 +158,11 @@ def start_app() -> str:
 
         Returns
         -------
-        str: QGIS app version that was started.
+        QgsApplication
+
+        A QgsApplication singleton
     """
     global QGISAPP
-
-    extra_envvars = os.environ.get("QFIELDCLOUD_EXTRA_ENVVARS", "[]")
-
-    logging.info(f"Available user defined environment variables: {extra_envvars}")
 
     if QGISAPP is None:
         logging.info(
@@ -184,7 +192,7 @@ def start_app() -> str:
     # we set the `bad_layer_handler` and assume we always have only one single `QgsProject` instance within the job's life
     QgsProject.instance().setBadLayerHandler(bad_layer_handler)
 
-    return Qgis.version()
+    return QGISAPP
 
 
 def stop_app():
@@ -213,64 +221,62 @@ def stop_app():
 
 
 def open_qgis_project(
-    the_qgis_file_name: str,
+    project_filename: str,
     force_reload: bool = False,
     disable_feature_count: bool = False,
     flags: Qgis.ProjectReadFlags = Qgis.ProjectReadFlags(),
 ) -> QgsProject:
-    logging.info(f'Loading the QGIS file "{the_qgis_file_name}"…')
+    logging.info(f'Loading QGIS project "{project_filename}"…')
 
-    if not Path(the_qgis_file_name).exists():
-        raise FileNotFoundError(f"File not found: {the_qgis_file_name}")
+    if not Path(project_filename).exists():
+        raise FileNotFoundError(project_filename)
 
     project = QgsProject.instance()
 
-    if project.fileName() == str(the_qgis_file_name) and not force_reload:
+    if project.fileName() == str(project_filename) and not force_reload:
         logging.info(
-            f'Skip loading the QGIS file "{the_qgis_file_name}", it is already loaded'
+            f'Skip loading QGIS project "{project_filename}", it is already loaded'
         )
         return project
 
     if disable_feature_count:
-        strip_feature_count_from_project_xml(the_qgis_file_name)
+        strip_feature_count_from_project_xml(project_filename)
 
     with set_bad_layer_handler(project):
-        if not project.read(str(the_qgis_file_name), flags):
-            logging.error(f'Failed to load the QGIS file "{the_qgis_file_name}"!')
+        if not project.read(str(project_filename), flags):
+            logging.error(f'Failed to load QGIS project "{project_filename}"!')
 
             project.setFileName("")
 
-            raise Exception(
-                f"Unable to open project with QGIS file: {the_qgis_file_name}"
-            )
+            raise Exception(f"Unable to open project with QGIS: {project_filename}")
 
     logging.info("Project loaded.")
 
     return project
 
 
-def strip_feature_count_from_project_xml(the_qgis_file_name: str) -> None:
+def strip_feature_count_from_project_xml(project_filename: str) -> None:
     """Rewrites project XML file with feature count disabled.
 
     Args:
-        the_qgis_file_name: filename of the QGIS filename (.qgs or .qgz)
+        project_filename (str): filename of the QGIS project file (.qgs or .qgz)
     """
     archive = None
-    xml_file = the_qgis_file_name
-    if QgsZipUtils.isZipFile(the_qgis_file_name):
-        logging.info("The QGIS file is zipped as .qgz, unzipping…")
+    xml_file = project_filename
+    if QgsZipUtils.isZipFile(project_filename):
+        logging.info("The project file is zipped as .qgz, unzipping…")
 
         archive = QgsProjectArchive()
 
-        if archive.unzip(the_qgis_file_name):
-            logging.info("The QGIS file is unzipped successfully!")
+        if archive.unzip(project_filename):
+            logging.info("The project file is unzipped successfully!")
             xml_file = archive.projectFile()
         else:
-            logging.error("The QGIS file is unzipping failed!")
+            logging.error("The project file is unzipping failed!")
 
-            raise Exception(f"Failed to unzip {the_qgis_file_name} file!")
+            raise Exception(f"Failed to unzip {project_filename} file!")
 
-    logging.info("Parsing QGIS file XML…")
+    logging.info("Parsing QGIS project file XML…")
 
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -299,16 +305,16 @@ def strip_feature_count_from_project_xml(the_qgis_file_name: str) -> None:
 
         archive.addFile(xml_file)
 
-        if not archive.zip(the_qgis_file_name):
-            raise Exception(f"Failed to zip QGIS file {the_qgis_file_name}!")
+        if not archive.zip(project_filename):
+            raise Exception(f"Failed to zip {project_filename} file!")
     else:
         tree.write(xml_file, short_empty_elements=False)
 
-    logging.info("The QGIS file re-written!")
+    logging.info("QGIS project file re-written!")
 
 
 def download_project(
-    project_id: str, destination: Path | None = None, skip_attachments: bool = True
+    project_id: str, destination: Path = None, skip_attachments: bool = True
 ) -> Path:
     """Download the files in the project "working" directory from the S3
     Storage into a temporary directory. Returns the directory path"""
@@ -532,26 +538,21 @@ def logger_context(step: Step):
         print(f"::>>>::{log_uuid} {step.stage}", file=sys.stderr)
 
 
-def is_localhost(hostname: str, port: int | None = None) -> bool:
+def is_localhost(hostname: str, port: int = None) -> bool:
     """returns True if the hostname points to the localhost, otherwise False."""
     if port is None:
         port = 22  # no port specified, lets just use the ssh port
-
     try:
         hostname = socket.getfqdn(hostname)
-
         if hostname in ("localhost", "0.0.0.0"):
             return True
-
         localhost = socket.gethostname()
         localaddrs = socket.getaddrinfo(localhost, port)
         targetaddrs = socket.getaddrinfo(hostname, port)
-
         for _family, _socktype, _proto, _canonname, sockaddr in localaddrs:
             for _rfamily, _rsocktype, _rproto, _rcanonname, rsockaddr in targetaddrs:
                 if rsockaddr[0] == sockaddr[0]:
                     return True
-
         return False
     except Exception:
         return False
@@ -569,7 +570,7 @@ def has_ping(hostname: str) -> bool:
     return not bool(error) and "100% packet loss" not in out.decode("utf8")
 
 
-def get_layer_filename(layer: QgsMapLayer) -> str | None:
+def get_layer_filename(layer: QgsMapLayer) -> Optional[str]:
     metadata = QgsProviderRegistry.instance().providerMetadata(
         layer.dataProvider().name()
     )
@@ -623,18 +624,16 @@ def extract_project_details(project: QgsProject) -> dict[str, str]:
 
 def json_default(obj):
     obj_str = type(obj).__qualname__
-
     try:
         obj_str += f" {str(obj)}"
     except Exception:
         obj_str += " <non-representable>"
-
     return f"<non-serializable: {obj_str}>"
 
 
 def run_workflow(
     workflow: Workflow,
-    feedback_filename: Path | IO | None,
+    feedback_filename: Optional[Path | IO],
 ) -> dict[str, Any]:
     """Executes the steps required to run a task and return structured feedback from the execution
 
@@ -645,8 +644,8 @@ def run_workflow(
     Some return values can used as arguments for next steps, as defined in `public_returns`.
 
     Args:
-        workflow: workflow to be executed
-        feedback_filename: write feedback to an IO device, to Path filename, or don't write it
+        workflow (Workflow): workflow to be executed
+        feedback_filename (IO | Path): write feedback to an IO device, to Path filename, or don't write it
     """
     feedback: dict[str, Any] = {
         "feedback_version": "2.0",
@@ -752,21 +751,9 @@ def get_layers_data(project: QgsProject) -> dict[str, dict]:
         error = layer.error()
         layer_id = layer.id()
         layer_source = LayerSource(layer)
-        filename = layer_source.filename
         datasource = None
 
-        # TODO: Move localized layer handling functionality inside libqfieldsync (ClickUp: QF-5875)
-        if layer_source.is_localized_path:
-            datasource = bad_layer_handler.invalid_layer_sources_by_id.get(layer_id)
-
-            if datasource and "localized:" in datasource:
-                # TODO: refactor and extract filename splitting logic into a reusable utility.
-                filename = datasource.split("localized:")[-1]
-
-                if "|" in filename:
-                    filename = filename.split("|")[0]
-
-        elif layer.dataProvider():
+        if layer.dataProvider():
             datasource = layer.dataProvider().uri().uri()
 
         layers_by_id[layer_id] = {
@@ -794,7 +781,7 @@ def get_layers_data(project: QgsProject) -> dict[str, dict]:
             "error_code": "no_error",
             "error_summary": error.summary() if error.messageList() else "",
             "error_message": layer.error().message(),
-            "filename": filename,
+            "filename": layer_source.filename,
             "provider_name": None,
             "provider_error_summary": None,
             "provider_error_message": None,
@@ -896,7 +883,7 @@ def layers_data_to_string(layers_by_id):
     table = [
         [
             d["name"],
-            f"...{d['id'][-6:]}",
+            f'...{d["id"][-6:]}',
             d["is_valid"],
             d["error_code"],
             d["error_summary"],
@@ -988,7 +975,7 @@ class XmlErrorLocation(NamedTuple):
 
 def get_qgis_xml_error_location(
     invalid_token_error_msg: str,
-) -> XmlErrorLocation | None:
+) -> Optional[XmlErrorLocation]:
     """Get column and line numbers from the provided error message."""
     if "invalid token" not in invalid_token_error_msg.casefold():
         return None
@@ -1003,7 +990,7 @@ def get_qgis_xml_error_location(
 
 def get_qgis_xml_error_context(
     invalid_token_error_msg: str, fh: io.BufferedReader
-) -> str | None:
+) -> Optional[str]:
     """Get a slice of the line where the exception occurred, with all faulty occurrences sanitized."""
     location = get_qgis_xml_error_location(invalid_token_error_msg)
     if location:

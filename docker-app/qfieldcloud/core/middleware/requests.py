@@ -24,7 +24,7 @@ def attach_keys(get_response):
             and "Content-Length" in request.headers
             and (
                 int(request.headers["Content-Length"])
-                < int(config.SENTRY_REQUEST_MAX_SIZE_TO_SEND)
+                < config.SENTRY_REQUEST_MAX_SIZE_TO_SEND
             )
         ):
             logger.info("Making a temporary copy for request body.")

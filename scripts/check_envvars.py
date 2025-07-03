@@ -2,18 +2,16 @@
 import argparse
 import re
 from pathlib import Path
+from typing import Dict, List, Set
 
 import yaml
 
 
-def get_env_varnames_from_envfile(filename: str) -> set[str]:
+def get_env_varnames_from_envfile(filename: str) -> Set[str]:
     result = set()
 
     with open(filename) as f:
         for line in f.readlines():
-            if line.startswith(" "):
-                continue
-
             if line.strip().startswith("#"):
                 continue
 
@@ -31,7 +29,7 @@ def get_env_varnames_from_envfile(filename: str) -> set[str]:
         return result
 
 
-def get_env_varnames_from_docker_compose(filename: Path) -> set[str]:
+def get_env_varnames_from_docker_compose(filename: Path) -> Set[str]:
     regex = r"\$\{(\w+)(:-?\w+?)?\}"
     result = set()
 
@@ -48,7 +46,7 @@ def get_env_varnames_from_docker_compose(filename: Path) -> set[str]:
 
 def get_env_varnames_from_docker_compose_files(
     search_path: str,
-) -> dict[str, list[str]]:
+) -> Dict[str, List[str]]:
     env_vars = {}
 
     for path in Path(search_path).glob("**/docker-compose*.yml"):
@@ -62,7 +60,7 @@ def get_env_varnames_from_docker_compose_files(
     return env_vars
 
 
-def get_env_varnames_from_k8s_kustomization(filename: Path) -> set[str]:
+def get_env_varnames_from_k8s_kustomization(filename: Path) -> Set[str]:
     result = set()
 
     with open(filename) as f:
@@ -74,13 +72,13 @@ def get_env_varnames_from_k8s_kustomization(filename: Path) -> set[str]:
     return result
 
 
-def get_env_varnames_from_k8s_secrets(filename: Path) -> set[str]:
+def get_env_varnames_from_k8s_secrets(filename: Path) -> Set[str]:
     with open(filename) as f:
         config = yaml.load(f, Loader=yaml.SafeLoader)
         return set(config["spec"]["encryptedData"].keys())
 
 
-def get_env_varnames_from_k8s_environments(search_path: str) -> dict[str, list[str]]:
+def get_env_varnames_from_k8s_environments(search_path: str) -> Dict[str, List[str]]:
     env_vars = {}
 
     for path in Path(search_path).iterdir():
@@ -93,9 +91,9 @@ def get_env_varnames_from_k8s_environments(search_path: str) -> dict[str, list[s
         secret_varnames = get_env_varnames_from_k8s_secrets(path.joinpath("secret.yml"))
 
         common_varnames = kustomization_varnames.intersection(secret_varnames)
-        assert len(common_varnames) == 0, (
-            f"Envvar(s) {common_varnames} are present both in the kustomization and the secret file in {path.name} environment. Choose only one!"
-        )
+        assert (
+            len(common_varnames) == 0
+        ), f"Envvar(s) {common_varnames} are present both in the kustomization and the secret file in {path.name} environment. Choose only one!"
 
         for varname in kustomization_varnames.union(secret_varnames):
             occurrences = env_vars.get(varname, [])

@@ -3,7 +3,7 @@
 ##########################
 
 # pull a builder image, the same as the base
-FROM python:3.10-slim-bookworm AS build
+FROM python:3.10.8-slim-buster AS build
 
 # Disable annoying pip version check, we don't care if pip is slightly older
 ARG PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -12,20 +12,14 @@ ARG PIP_DISABLE_PIP_VERSION_CHECK=1
 ARG PIP_NO_CACHE_DIR=1
 
 # install psycopg2 requirements
-RUN apt-get update \
-    && apt-get install -y \
-    libpq-dev \
-    python3-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libpq-dev python3-dev gcc
 
 # install `pip-compile` (as part of `pip-tools`)
-RUN pip3 install pip-tools
+RUN pip install pip-tools
 
 # install pip dependencies
 COPY ./requirements/requirements.txt /requirements/requirements.txt
-RUN pip3 install -r requirements/requirements.txt \
-    && rm requirements/requirements.txt
+RUN pip3 install -r requirements/requirements.txt
 
 # save 60 MB of data... Safe to delete according to botocore contributor https://github.com/boto/botocore/issues/1629#issuecomment-451309885
 RUN ls -Q /usr/local/lib/python3.10/site-packages/botocore/data | grep -xv "endpoints.json" | xargs rm -rf
@@ -35,7 +29,7 @@ RUN ls -Q /usr/local/lib/python3.10/site-packages/botocore/data | grep -xv "endp
 ##########################
 
 # pull official base image
-FROM python:3.10-slim-bookworm AS base
+FROM python:3.10.8-slim-buster AS base
 
 # set work directory
 WORKDIR /usr/src/app
@@ -49,17 +43,13 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PIP_NO_CACHE_DIR=1
 
 # install dependencies
-RUN apt-get update \
-    && apt-get install -y \
+RUN apt-get update && apt-get install -y \
 # GeoDjango as recommended at https://docs.djangoproject.com/en/4.1/ref/contrib/gis/install/geolibs/#installing-geospatial-libraries
     binutils libproj-dev gdal-bin \
 # needed for Django's `manage.py makemessages`
     gettext \
 # for development purposes only (optional dependency for `django-extensions`)
-    graphviz \
-# timezone data used by python to determine the user's timezone
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    graphviz
 
 # copy the dependencies
 COPY --from=build /usr/local/lib/python3.10/site-packages/ /usr/local/lib/python3.10/site-packages/

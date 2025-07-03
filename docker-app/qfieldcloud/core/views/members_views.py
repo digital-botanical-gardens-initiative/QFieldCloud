@@ -25,9 +25,8 @@ class ListCreateMembersViewPermissions(permissions.BasePermission):
 
         if request.method == "GET":
             return permissions_utils.can_read_members(user, organization)
-        elif request.method == "POST":
+        if request.method == "POST":
             return permissions_utils.can_create_members(user, organization)
-
         return False
 
 
@@ -83,11 +82,10 @@ class GetUpdateDestroyMemberViewPermissions(permissions.BasePermission):
 
         if request.method == "GET":
             return permissions_utils.can_read_members(user, organization)
-        elif request.method in ["PUT", "PATCH"]:
+        if request.method in ["PUT", "PATCH"]:
             return permissions_utils.can_update_members(user, organization)
-        elif request.method in ["DELETE"]:
+        if request.method in ["DELETE"]:
             return permissions_utils.can_delete_members(user, organization)
-
         return False
 
 

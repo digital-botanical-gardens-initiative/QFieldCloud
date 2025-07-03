@@ -6,7 +6,6 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
-from django.db.models import Q
 from qfieldcloud.core.models import Job
 from worker_wrapper.wrapper import (
     DeltaApplyJobRun,
@@ -71,15 +70,11 @@ class Command(BaseCommand):
                     ]
                 ).values("project_id")
 
-                # select all the pending jobs, that their project has no other active job or `is_locked` flag is `True`
+                # select all the pending jobs, that their project has no other active job
                 jobs_qs = (
                     Job.objects.select_for_update(skip_locked=True)
                     .filter(status=Job.Status.PENDING)
-                    .exclude(
-                        Q(project_id__in=busy_projects_ids_qs)
-                        # skip all projects that are currently locked, most probably because of file transfer
-                        | Q(project__is_locked=True),
-                    )
+                    .exclude(project_id__in=busy_projects_ids_qs)
                     .order_by("created_at")
                 )
 

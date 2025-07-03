@@ -1,12 +1,10 @@
 import io
 import os
-import tempfile
 from datetime import timedelta
 from time import sleep
 from typing import IO, Iterable
 
 from django.utils import timezone
-
 from qfieldcloud.core.models import Job, Project, User
 from qfieldcloud.subscription.models import Plan, Subscription
 
@@ -58,9 +56,9 @@ def set_subscription(
     **kwargs,
 ):
     users: list[User] = [users] if isinstance(users, User) else users
-    assert len(users), (
-        "When iterable, the first argument must contain at least 1 element."
-    )
+    assert len(
+        users
+    ), "When iterable, the first argument must contain at least 1 element."
 
     code = code or f"plan_for_{'_and_'.join([u.username for u in users])}"
     plan = Plan.objects.get_or_create(
@@ -69,9 +67,9 @@ def set_subscription(
         **kwargs,
     )[0]
     for user in users:
-        assert user.type == plan.user_type, (
-            'All users must have the same type "{plan.user_type.value}", but "{user.username}" has "{user.type.value}"'
-        )
+        assert (
+            user.type == plan.user_type
+        ), 'All users must have the same type "{plan.user_type.value}", but "{user.username}" has "{user.type.value}"'
         subscription: Subscription = user.useraccount.current_subscription
         subscription.plan = plan
         subscription.active_since = timezone.now() - timedelta(days=1)
@@ -80,28 +78,9 @@ def set_subscription(
     return subscription
 
 
-def get_random_file(mb: float) -> IO:
+def get_random_file(mb: int) -> IO:
     """Helper that returns a file of given size in megabytes"""
-    bytes_size = 1000 * int(mb * 1000)
-    return io.BytesIO(os.urandom(bytes_size))
-
-
-class get_named_file_with_size:
-    def __init__(self, mb: int) -> None:
-        self.bytes_size = 1000 * int(mb * 1000)
-
-    def __enter__(self):
-        self.file = tempfile.NamedTemporaryFile("w+b", prefix="qfc_test_tmp_")
-        self.file.seek(self.bytes_size - 1)
-        self.file.write(b"0")
-        self.file.flush()
-        self.file.seek(0)
-
-        return self.file
-
-    def __exit__(self, exc_type, exc_value, exc_tb):
-        if self.file:
-            self.file.close()
+    return io.BytesIO(os.urandom(1000 * int(mb * 1000)))
 
 
 def wait_for_project_ok_status(project: Project, wait_s: int = 30):
@@ -128,16 +107,10 @@ def wait_for_project_ok_status(project: Project, wait_s: int = 30):
         fail(f"Still pending jobs after waiting for {wait_s} seconds")
 
     for _ in range(wait_s):
-        try:
-            del project.status  # type: ignore
-        except AttributeError:
-            pass
-
         project.refresh_from_db()
-
         if project.status == Project.Status.OK:
             return
-        elif project.status == Project.Status.FAILED:
+        if project.status == Project.Status.FAILED:
             fail("Waited for ok status, but got failed")
             return
 

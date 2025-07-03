@@ -4,12 +4,17 @@ from datetime import timedelta
 import django.db.utils
 from django.utils import timezone
 from django_currentuser.middleware import _set_current_user
-from rest_framework import status
-from rest_framework.test import APITransactionTestCase
-
 from qfieldcloud.authentication.models import AuthToken
+from qfieldcloud.core import utils
 from qfieldcloud.core.models import Person, Project
 from qfieldcloud.core.tests.utils import get_random_file, setup_subscription_plans
+from qfieldcloud.core.utils import list_versions
+from qfieldcloud.core.utils2.storage import (
+    delete_project_file_permanently,
+    delete_project_file_version_permanently,
+)
+from rest_framework import status
+from rest_framework.test import APITransactionTestCase
 
 from ..exceptions import NotPremiumPlanException
 from ..models import Package, PackageType, Plan
@@ -588,17 +593,9 @@ class QfcTestCase(APITransactionTestCase):
         )
 
         p1 = Project.objects.create(name="p1", owner=self.u1)
-        token = AuthToken.objects.get_or_create(user=self.u1)[0]
-        self.client.credentials(HTTP_AUTHORIZATION="Token " + token.key)
-
-        response = self.client.post(
-            f"/api/v1/files/{p1.id}/file.name/",
-            {"file": get_random_file(mb=0.3)},
-            format="multipart",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-
+        storage_path = f"projects/{p1.id}/files/test.data"
+        bucket = utils.get_s3_bucket()
+        bucket.upload_fileobj(get_random_file(mb=0.3), storage_path)
         p1.save(recompute_storage=True)
 
         self.assertStorage(
@@ -615,14 +612,7 @@ class QfcTestCase(APITransactionTestCase):
             storage_free_mb=0.7,
         )
 
-        response = self.client.post(
-            f"/api/v1/files/{p1.id}/file.name/",
-            {"file": get_random_file(mb=0.1)},
-            format="multipart",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-
+        bucket.upload_fileobj(get_random_file(mb=0.1), storage_path)
         p1.save(recompute_storage=True)
 
         self.assertStorage(
@@ -639,22 +629,8 @@ class QfcTestCase(APITransactionTestCase):
             storage_free_mb=0.6,
         )
 
-        # TODO Delete with QF-4963 Drop support for legacy storage
-        if p1.uses_legacy_storage:
-            version = p1.legacy_files[0].versions[0]
-        else:
-            version = p1.files.all()[0].versions.all().reverse()[0]
-
-        response = self.client.delete(
-            f"/api/v1/files/{p1.id}/file.name/?version={str(version.id)}",
-        )
-
-        # TODO Delete with QF-4963 Drop support for legacy storage
-        if p1.uses_legacy_storage:
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-        else:
-            self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-
+        version = list(list_versions(bucket, storage_path))[0]
+        delete_project_file_version_permanently(p1, "test.data", version.id)
         p1.save(recompute_storage=True)
 
         self.assertStorage(
@@ -671,14 +647,7 @@ class QfcTestCase(APITransactionTestCase):
             storage_free_mb=0.9,
         )
 
-        response = self.client.delete(f"/api/v1/files/{p1.id}/file.name/")
-
-        # TODO Delete with QF-4963 Drop support for legacy storage
-        if p1.uses_legacy_storage:
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-        else:
-            self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-
+        delete_project_file_permanently(p1, "test.data")
         p1.save(recompute_storage=True)
 
         self.assertStorage(

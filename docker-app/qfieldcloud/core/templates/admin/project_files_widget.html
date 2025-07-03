@@ -246,10 +246,8 @@
 
                             apiCall(`files/${projectId}/${file.name}/`, {
                                 method: 'DELETE',
-                                params: {
-                                    'version': $versionsSelect.value,
-                                },
                                 headers: {
+                                    'X-File-Version': $versionsSelect.value,
                                     'X-CSRFToken': csrfmiddlewaretoken,
                                 },
                             })

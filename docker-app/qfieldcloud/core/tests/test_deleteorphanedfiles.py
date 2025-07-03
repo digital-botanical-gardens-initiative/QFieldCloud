@@ -1,14 +1,7 @@
-"""
-Todo:
-    * Delete with QF-4963 Drop support for legacy storage
-"""
-
 import io
 
-from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
-
 from qfieldcloud.core.models import Person, Project
 from qfieldcloud.core.utils import get_project_files_count, get_s3_bucket
 from qfieldcloud.core.utils2 import storage
@@ -22,7 +15,7 @@ class QfcTestCase(TestCase):
 
         self.u1 = Person.objects.create(username="u1")
         set_subscription(self.u1, "default_user")
-        self.projects: list[Project] = []
+        self.projects = []
 
         get_s3_bucket().objects.filter(Prefix="projects/").delete()
 
@@ -31,11 +24,7 @@ class QfcTestCase(TestCase):
     def generate_projects(self, count: int):
         offset = len(self.projects)
         for i in range(1, count + 1):
-            p = Project.objects.create(
-                name=f"p{offset + i}",
-                owner=self.u1,
-                file_storage=settings.LEGACY_STORAGE_NAME,
-            )
+            p = Project.objects.create(name=f"p{offset + i}", owner=self.u1)
             self.projects.append(p)
             file = io.BytesIO(b"Hello world!")
             storage.upload_project_file(p, file, "project.qgs")
@@ -52,10 +41,8 @@ class QfcTestCase(TestCase):
         return out.getvalue()
 
     def test_nothing_to_delete(self):
-        project_ids = sorted([str(p.id) for p in self.projects])
-
-        self.assertEqual(get_project_files_count(project_ids[0]), 1)
-        self.assertEqual(self.projects[1].files_count, 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 1)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
         out = self.call_command()
 
@@ -69,14 +56,12 @@ class QfcTestCase(TestCase):
             ),
         )
 
-        self.assertEqual(get_project_files_count(project_ids[0]), 1)
-        self.assertEqual(self.projects[1].files_count, 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 1)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
     def test_dry_run(self):
-        project_ids = sorted([str(p.id) for p in self.projects])
-
-        self.assertEqual(get_project_files_count(project_ids[0]), 1)
-        self.assertEqual(self.projects[1].files_count, 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 1)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
         out = self.call_command(dry_run=True)
 
@@ -91,8 +76,8 @@ class QfcTestCase(TestCase):
             ),
         )
 
-        self.assertEqual(get_project_files_count(project_ids[0]), 1)
-        self.assertEqual(self.projects[1].files_count, 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 1)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
     def test_delete_files(self):
         project_ids = sorted([str(p.id) for p in self.projects])
@@ -142,10 +127,8 @@ class QfcTestCase(TestCase):
         self.assertEqual(get_project_files_count(project_ids[1]), 1)
 
     def test_invalid_uuid(self):
-        project_ids = sorted([str(p.id) for p in self.projects])
-
-        self.assertEqual(get_project_files_count(project_ids[0]), 1)
-        self.assertEqual(self.projects[1].files_count, 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 1)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
         file = io.BytesIO(b"Hello world!")
         storage.upload_file(file, "projects/strangename/project.qgs")
@@ -163,8 +146,8 @@ class QfcTestCase(TestCase):
             ),
         )
 
-        self.assertEqual(get_project_files_count(project_ids[0]), 1)
-        self.assertEqual(self.projects[1].files_count, 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 1)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
     def test_batches(self):
         self.generate_projects(2)
@@ -202,8 +185,8 @@ class QfcTestCase(TestCase):
         project_ids = sorted([str(p.id) for p in self.projects])
         Project.objects.filter(id__in=project_ids).delete()
 
-        self.assertEqual(get_project_files_count(str(self.projects[0].id)), 2)
-        self.assertEqual(get_project_files_count(str(self.projects[1].id)), 1)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 2)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 1)
 
         out = self.call_command()
 
@@ -218,5 +201,5 @@ class QfcTestCase(TestCase):
             ),
         )
 
-        self.assertEqual(get_project_files_count(project_ids[0]), 0)
-        self.assertEqual(get_project_files_count(project_ids[1]), 0)
+        self.assertEqual(get_project_files_count(self.projects[0].id), 0)
+        self.assertEqual(get_project_files_count(self.projects[1].id), 0)
